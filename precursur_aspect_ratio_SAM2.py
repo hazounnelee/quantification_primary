@@ -78,6 +78,7 @@ CONST_DEFAULT_POINT_BATCH_SIZE: int = 32
 CONST_DEFAULT_DEDUP_IOU: float = 0.60
 CONST_DEFAULT_BBOX_DEDUP_IOU: float = 0.85
 CONST_DEFAULT_MULTIMASK_OUTPUT: bool = True
+CONST_DEFAULT_USE_POINT_PROMPTS: bool = True
 
 CONST_SUPPORTED_IMAGE_SUFFIXES: tp.Tuple[str, ...] = (
     ".jpg",
@@ -120,6 +121,7 @@ class Sam2AspectRatioConfig:
     float_dedupIou: float = CONST_DEFAULT_DEDUP_IOU
     float_bboxDedupIou: float = CONST_DEFAULT_BBOX_DEDUP_IOU
     bool_multimaskOutput: bool = CONST_DEFAULT_MULTIMASK_OUTPUT
+    bool_usePointPrompts: bool = CONST_DEFAULT_USE_POINT_PROMPTS
     str_device: tp.Optional[str] = None
     bool_retinaMasks: bool = CONST_DEFAULT_RETINA_MASKS
     bool_saveIndividualMasks: bool = CONST_DEFAULT_SAVE_INDIVIDUAL_MASKS
@@ -480,7 +482,7 @@ class Sam2AspectRatioService:
         self,
         arr_inputBgr: np.ndarray,
     ) -> tp.Tuple[np.ndarray, tp.Optional[np.ndarray], tp.Dict[str, tp.Any]]:
-        """타일링 + blob/edge 후보점 기반 SAM2 point prompt 추론 수행."""
+        """타일 단위로 SAM2 추론 수행. 필요 시 후보점 기반 point prompt를 사용."""
         if self.obj_model is None:
             self.initialize_model()
 
@@ -514,39 +516,54 @@ class Sam2AspectRatioService:
 
         for int_tileIdx, (int_tx1, int_ty1, int_tx2, int_ty2) in enumerate(list_tiles):
             arr_tileBgr = arr_inputBgr[int_ty1:int_ty2, int_tx1:int_tx2].copy()
-            arr_tileGray = arr_inputGray[int_ty1:int_ty2, int_tx1:int_tx2].copy()
-            list_points = sample_interest_points(
-                arr_tileGray=arr_tileGray,
-                int_maxPoints=self.obj_config.int_pointsPerTile,
-                int_minDistance=self.obj_config.int_pointMinDistance,
-                float_qualityLevel=self.obj_config.float_pointQualityLevel,
-            )
+            list_promptBatches: tp.List[tp.Optional[tp.Sequence[tp.Tuple[int, int]]]] = [None]
+            list_points: tp.List[tp.Tuple[int, int]] = []
+
+            if self.obj_config.bool_usePointPrompts:
+                arr_tileGray = arr_inputGray[int_ty1:int_ty2, int_tx1:int_tx2].copy()
+                list_points = sample_interest_points(
+                    arr_tileGray=arr_tileGray,
+                    int_maxPoints=self.obj_config.int_pointsPerTile,
+                    int_minDistance=self.obj_config.int_pointMinDistance,
+                    float_qualityLevel=self.obj_config.float_pointQualityLevel,
+                )
+                list_promptBatches = list(iter_chunks(list_points, self.obj_config.int_pointBatchSize))
+
+                for int_px, int_py in list_points:
+                    int_candidateCount += 1
+                    list_debugPoints.append(
+                        {
+                            "tile_index": int_tileIdx,
+                            "tile_xyxy": [int_tx1, int_ty1, int_tx2, int_ty2],
+                            "point_xy_tile": [int_px, int_py],
+                            "point_xy_roi": [int_tx1 + int_px, int_ty1 + int_py],
+                        }
+                    )
+
             list_debugTiles.append(
                 {
                     "tile_index": int_tileIdx,
                     "tile_xyxy": [int_tx1, int_ty1, int_tx2, int_ty2],
-                        "num_points": len(list_points),
-                    }
-                )
-            for int_px, int_py in list_points:
-                int_candidateCount += 1
-                list_debugPoints.append(
-                    {
-                        "tile_index": int_tileIdx,
-                        "tile_xyxy": [int_tx1, int_ty1, int_tx2, int_ty2],
-                        "point_xy_tile": [int_px, int_py],
-                        "point_xy_roi": [int_tx1 + int_px, int_ty1 + int_py],
-                    }
-                )
+                    "num_points": len(list_points),
+                    "use_point_prompts": bool(self.obj_config.bool_usePointPrompts),
+                }
+            )
 
-            for list_pointChunk in iter_chunks(list_points, self.obj_config.int_pointBatchSize):
-                list_chunkLabels = [1] * len(list_pointChunk)
-                list_results = self.obj_model(  # type: ignore[misc]
-                    source=arr_tileBgr,
-                    points=[[int_px, int_py] for int_px, int_py in list_pointChunk],
-                    labels=list_chunkLabels,
-                    **dict_predictCommon,
-                )
+            for list_pointChunk in list_promptBatches:
+                if self.obj_config.bool_usePointPrompts:
+                    if not list_pointChunk:
+                        continue
+                    list_results = self.obj_model(  # type: ignore[misc]
+                        source=arr_tileBgr,
+                        points=[[int_px, int_py] for int_px, int_py in list_pointChunk],
+                        labels=[1] * len(list_pointChunk),
+                        **dict_predictCommon,
+                    )
+                else:
+                    list_results = self.obj_model(  # type: ignore[misc]
+                        source=arr_tileBgr,
+                        **dict_predictCommon,
+                    )
                 if not list_results:
                     continue
 
@@ -891,6 +908,7 @@ class Sam2AspectRatioService:
             "dedup_iou": float(self.obj_config.float_dedupIou),
             "bbox_dedup_iou": float(self.obj_config.float_bboxDedupIou),
             "multimask_output_requested": bool(self.obj_config.bool_multimaskOutput),
+            "use_point_prompts": bool(self.obj_config.bool_usePointPrompts),
             "particle_area_threshold": float(self.obj_config.float_particleAreaThreshold),
             "mask_binarize_threshold": float(self.obj_config.float_maskBinarizeThreshold),
             "min_valid_mask_area": int(self.obj_config.int_minValidMaskArea),
@@ -1207,6 +1225,7 @@ def run_sam2_aspect_ratio(
     float_dedupIou: float = CONST_DEFAULT_DEDUP_IOU,
     float_bboxDedupIou: float = CONST_DEFAULT_BBOX_DEDUP_IOU,
     bool_multimaskOutput: bool = CONST_DEFAULT_MULTIMASK_OUTPUT,
+    bool_usePointPrompts: bool = CONST_DEFAULT_USE_POINT_PROMPTS,
     str_device: tp.Optional[str] = None,
     bool_retinaMasks: bool = CONST_DEFAULT_RETINA_MASKS,
     bool_saveIndividualMasks: bool = CONST_DEFAULT_SAVE_INDIVIDUAL_MASKS,
@@ -1246,6 +1265,7 @@ def run_sam2_aspect_ratio(
             float_dedupIou=float_dedupIou,
             float_bboxDedupIou=float_bboxDedupIou,
             bool_multimaskOutput=bool_multimaskOutput,
+            bool_usePointPrompts=bool_usePointPrompts,
             str_device=str_device,
             bool_retinaMasks=bool_retinaMasks,
             bool_saveIndividualMasks=bool_saveIndividualMasks,
@@ -1503,6 +1523,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="point prompt 당 여러 mask 후보를 받을지 여부",
     )
     obj_parser.add_argument(
+        "--use_point_prompts",
+        action=argparse.BooleanOptionalAction,
+        default=CONST_DEFAULT_USE_POINT_PROMPTS,
+        help="opencv 후보점 기반 point prompt 추론 사용 여부",
+    )
+    obj_parser.add_argument(
         "--save_mask_imgs",
         "--save_individual_masks",
         dest="save_mask_imgs",
@@ -1544,6 +1570,7 @@ def main() -> None:
         float_dedupIou=obj_args.dedup_iou,
         float_bboxDedupIou=obj_args.bbox_dedup_iou,
         bool_multimaskOutput=obj_args.multimask_output,
+        bool_usePointPrompts=obj_args.use_point_prompts,
         str_device=obj_args.device,
         bool_retinaMasks=obj_args.retina_masks,
         bool_saveIndividualMasks=obj_args.save_mask_imgs,
