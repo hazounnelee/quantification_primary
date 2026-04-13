@@ -44,6 +44,7 @@ CONST_PARTICLE_AREA_THRESHOLD: float = 100.0
 
 # ROI 가장자리와 가까운 bbox를 제외하기 위한 margin
 CONST_BBOX_EDGE_MARGIN: int = 8
+CONST_TILE_EDGE_MARGIN: int = 8
 
 # 실제 SAM2 추론에 사용할 ROI
 CONST_ROI_X_MIN: int = 0
@@ -100,6 +101,7 @@ class Sam2AspectRatioConfig:
     int_roiXMax: int = CONST_ROI_X_MAX
     int_roiYMax: int = CONST_ROI_Y_MAX
     int_bboxEdgeMargin: int = CONST_BBOX_EDGE_MARGIN
+    int_tileEdgeMargin: int = CONST_TILE_EDGE_MARGIN
     float_particleAreaThreshold: float = CONST_PARTICLE_AREA_THRESHOLD
     float_maskBinarizeThreshold: float = CONST_MASK_BINARIZE_THRESHOLD
     int_minValidMaskArea: int = CONST_MIN_VALID_MASK_AREA
@@ -509,6 +511,22 @@ class Sam2AspectRatioService:
                     if int(arr_tileMask.sum()) < self.obj_config.int_minValidMaskArea:
                         continue
 
+                    arr_tileContour = self.extract_largest_contour(arr_tileMask)
+                    if arr_tileContour is None:
+                        continue
+                    int_bx, int_by, int_bw, int_bh = cv2.boundingRect(arr_tileContour)
+                    int_tileHeight, int_tileWidth = arr_tileMask.shape[:2]
+                    if self.is_bbox_near_edge(
+                        int_x=int_bx,
+                        int_y=int_by,
+                        int_w=int_bw,
+                        int_h=int_bh,
+                        int_width=int_tileWidth,
+                        int_height=int_tileHeight,
+                        int_margin=self.obj_config.int_tileEdgeMargin,
+                    ):
+                        continue
+
                     arr_roiMask = np.zeros((int_roiHeight, int_roiWidth), dtype=np.uint8)
                     arr_roiMask[int_ty1:int_ty2, int_tx1:int_tx2] = arr_tileMask
 
@@ -604,6 +622,27 @@ class Sam2AspectRatioService:
             return None
         return max(list_contours, key=cv2.contourArea)
 
+    @staticmethod
+    def is_bbox_near_edge(
+        int_x: int,
+        int_y: int,
+        int_w: int,
+        int_h: int,
+        int_width: int,
+        int_height: int,
+        int_margin: int,
+    ) -> bool:
+        """bbox가 주어진 영역 경계와 margin 이내면 제외 대상으로 판정."""
+        int_margin = max(0, int_margin)
+        int_right = int_x + int_w
+        int_bottom = int_y + int_h
+        return (
+            int_x <= int_margin
+            or int_y <= int_margin
+            or int_right >= (int_width - int_margin)
+            or int_bottom >= (int_height - int_margin)
+        )
+
     def is_bbox_near_roi_edge(
         self,
         int_x: int,
@@ -614,14 +653,14 @@ class Sam2AspectRatioService:
         int_roiHeight: int,
     ) -> bool:
         """bbox가 ROI 경계와 margin 이내면 제외 대상으로 판정."""
-        int_margin = max(0, self.obj_config.int_bboxEdgeMargin)
-        int_right = int_x + int_w
-        int_bottom = int_y + int_h
-        return (
-            int_x <= int_margin
-            or int_y <= int_margin
-            or int_right >= (int_roiWidth - int_margin)
-            or int_bottom >= (int_roiHeight - int_margin)
+        return self.is_bbox_near_edge(
+            int_x=int_x,
+            int_y=int_y,
+            int_w=int_w,
+            int_h=int_h,
+            int_width=int_roiWidth,
+            int_height=int_roiHeight,
+            int_margin=self.obj_config.int_bboxEdgeMargin,
         )
 
     def measure_mask(
@@ -772,6 +811,7 @@ class Sam2AspectRatioService:
             "model_weights_resolved_name": self.resolve_model_weights_path().name,
             "model_name": self.dict_modelConfig.get("model", self.obj_config.path_modelWeights.stem),
             "bbox_edge_margin": int(self.obj_config.int_bboxEdgeMargin),
+            "tile_edge_margin": int(self.obj_config.int_tileEdgeMargin),
             "tile_size": int(self.obj_config.int_tileSize),
             "stride": int(self.obj_config.int_stride),
             "points_per_tile": int(self.obj_config.int_pointsPerTile),
@@ -1077,6 +1117,7 @@ def run_sam2_aspect_ratio(
     int_roiXMax: int = CONST_ROI_X_MAX,
     int_roiYMax: int = CONST_ROI_Y_MAX,
     int_bboxEdgeMargin: int = CONST_BBOX_EDGE_MARGIN,
+    int_tileEdgeMargin: int = CONST_TILE_EDGE_MARGIN,
     float_particleAreaThreshold: float = CONST_PARTICLE_AREA_THRESHOLD,
     float_maskBinarizeThreshold: float = CONST_MASK_BINARIZE_THRESHOLD,
     int_minValidMaskArea: int = CONST_MIN_VALID_MASK_AREA,
@@ -1113,6 +1154,7 @@ def run_sam2_aspect_ratio(
             int_roiXMax=int_roiXMax,
             int_roiYMax=int_roiYMax,
             int_bboxEdgeMargin=int_bboxEdgeMargin,
+            int_tileEdgeMargin=int_tileEdgeMargin,
             float_particleAreaThreshold=float_particleAreaThreshold,
             float_maskBinarizeThreshold=float_maskBinarizeThreshold,
             int_minValidMaskArea=int_minValidMaskArea,
@@ -1271,6 +1313,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="ROI 경계와 이 margin 이내인 bbox는 제외",
     )
     obj_parser.add_argument(
+        "--tile_edge_margin",
+        type=int,
+        default=CONST_TILE_EDGE_MARGIN,
+        help="tile 경계와 이 margin 이내인 bbox는 제외",
+    )
+    obj_parser.add_argument(
         "--area_threshold",
         type=float,
         default=CONST_PARTICLE_AREA_THRESHOLD,
@@ -1390,6 +1438,7 @@ def main() -> None:
         int_roiXMax=obj_args.roi_x_max,
         int_roiYMax=obj_args.roi_y_max,
         int_bboxEdgeMargin=obj_args.bbox_edge_margin,
+        int_tileEdgeMargin=obj_args.tile_edge_margin,
         float_particleAreaThreshold=obj_args.area_threshold,
         float_maskBinarizeThreshold=obj_args.mask_binarize_threshold,
         int_minValidMaskArea=obj_args.min_valid_mask_area,
