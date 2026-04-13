@@ -41,11 +41,14 @@ from ultralytics import SAM
 # `particle` / `fragment` 분류 기준 면적
 CONST_PARTICLE_AREA_THRESHOLD: float = 100.0
 
+# ROI 가장자리와 가까운 bbox를 제외하기 위한 margin
+CONST_BBOX_EDGE_MARGIN: int = 8
+
 # 실제 SAM2 추론에 사용할 ROI
 CONST_ROI_X_MIN: int = 0
 CONST_ROI_Y_MIN: int = 0
 CONST_ROI_X_MAX: int = 1024
-CONST_ROI_Y_MAX: int = 768
+CONST_ROI_Y_MAX: int = 500
 
 # SAM2 raw mask를 binary mask로 바꿀 때 사용하는 threshold
 # 현재 Ultralytics 출력에 맞춰 기존 동작과 동일하게 0.0을 기본값으로 둔다.
@@ -88,6 +91,7 @@ class Sam2AspectRatioConfig:
     int_roiYMin: int = CONST_ROI_Y_MIN
     int_roiXMax: int = CONST_ROI_X_MAX
     int_roiYMax: int = CONST_ROI_Y_MAX
+    int_bboxEdgeMargin: int = CONST_BBOX_EDGE_MARGIN
     float_particleAreaThreshold: float = CONST_PARTICLE_AREA_THRESHOLD
     float_maskBinarizeThreshold: float = CONST_MASK_BINARIZE_THRESHOLD
     int_minValidMaskArea: int = CONST_MIN_VALID_MASK_AREA
@@ -148,7 +152,8 @@ class Sam2AspectRatioService:
 
     def load_model_config(self) -> None:
         """SAM2 YAML 설정을 로드하여 결과 메타데이터에 포함."""
-        str_rawText = self.obj_config.path_modelConfig.read_text(encoding="utf-8", errors="ignore")
+        str_rawText = self.obj_config.path_modelConfig.read_text(
+            encoding="utf-8", errors="ignore")
 
         try:
             obj_loaded = yaml.safe_load(str_rawText)
@@ -237,9 +242,11 @@ class Sam2AspectRatioService:
 
     def load_image_bgr(self) -> np.ndarray:
         """입력 이미지를 BGR 형식으로 로드."""
-        arr_image = cv2.imread(str(self.obj_config.path_input), cv2.IMREAD_COLOR)
+        arr_image = cv2.imread(
+            str(self.obj_config.path_input), cv2.IMREAD_COLOR)
         if arr_image is None:
-            raise FileNotFoundError(f"이미지를 읽을 수 없습니다: {self.obj_config.path_input}")
+            raise FileNotFoundError(
+                f"이미지를 읽을 수 없습니다: {self.obj_config.path_input}")
         return arr_image
 
     def extract_inference_roi(
@@ -287,7 +294,8 @@ class Sam2AspectRatioService:
         if self.obj_config.str_device:
             dict_predictKwargs["device"] = self.obj_config.str_device
 
-        list_results = self.obj_model(**dict_predictKwargs)  # type: ignore[misc]
+        list_results = self.obj_model(
+            **dict_predictKwargs)  # type: ignore[misc]
         if not list_results:
             raise RuntimeError("SAM2 결과가 비어 있습니다.")
 
@@ -296,7 +304,8 @@ class Sam2AspectRatioService:
         arr_masks = np.empty((0, 0, 0), dtype=np.uint8)
         if obj_result.masks is not None and obj_result.masks.data is not None:
             arr_maskData = obj_result.masks.data.detach().cpu().numpy()
-            arr_masks = (arr_maskData > self.obj_config.float_maskBinarizeThreshold).astype(np.uint8)
+            arr_masks = (
+                arr_maskData > self.obj_config.float_maskBinarizeThreshold).astype(np.uint8)
 
         arr_boxes = None
         if obj_result.boxes is not None and obj_result.boxes.xyxy is not None:
@@ -359,10 +368,31 @@ class Sam2AspectRatioService:
     @staticmethod
     def extract_largest_contour(arr_mask: np.ndarray) -> tp.Optional[np.ndarray]:
         """외곽 contour 중 가장 큰 contour 반환."""
-        list_contours, _ = cv2.findContours(arr_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        list_contours, _ = cv2.findContours(
+            arr_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not list_contours:
             return None
         return max(list_contours, key=cv2.contourArea)
+
+    def is_bbox_near_roi_edge(
+        self,
+        int_x: int,
+        int_y: int,
+        int_w: int,
+        int_h: int,
+        int_roiWidth: int,
+        int_roiHeight: int,
+    ) -> bool:
+        """bbox가 ROI 경계와 margin 이내면 제외 대상으로 판정."""
+        int_margin = max(0, self.obj_config.int_bboxEdgeMargin)
+        int_right = int_x + int_w
+        int_bottom = int_y + int_h
+        return (
+            int_x <= int_margin
+            or int_y <= int_margin
+            or int_right >= (int_roiWidth - int_margin)
+            or int_bottom >= (int_roiHeight - int_margin)
+        )
 
     def measure_mask(
         self,
@@ -381,6 +411,9 @@ class Sam2AspectRatioService:
             return None
 
         int_x, int_y, int_w, int_h = cv2.boundingRect(arr_contour)
+        int_roiHeight, int_roiWidth = arr_refinedMask.shape[:2]
+        if self.is_bbox_near_roi_edge(int_x, int_y, int_w, int_h, int_roiWidth, int_roiHeight):
+            return None
 
         obj_moments = cv2.moments(arr_contour)
         if obj_moments["m00"] > 0.0:
@@ -390,8 +423,15 @@ class Sam2AspectRatioService:
             float_cx = float(int_x + int_w / 2.0)
             float_cy = float(int_y + int_h / 2.0)
 
-        int_horizontal = self.get_longest_span(arr_refinedMask, bool_horizontal=True)
-        int_vertical = self.get_longest_span(arr_refinedMask, bool_horizontal=False)
+        # bbox가 실제 mask 외접 사각형이므로, 측정 span은 bbox 크기를 넘지 않도록 제한한다.
+        int_horizontal = min(
+            self.get_longest_span(arr_refinedMask, bool_horizontal=True),
+            int_w,
+        )
+        int_vertical = min(
+            self.get_longest_span(arr_refinedMask, bool_horizontal=False),
+            int_h,
+        )
 
         str_category = (
             "particle"
@@ -431,7 +471,8 @@ class Sam2AspectRatioService:
         arr_overlay = arr_imageBgr.copy()
 
         for obj_measurement, arr_mask in zip(list_objects, list_masks):
-            tpl_color = (60, 220, 60) if obj_measurement.str_category == "particle" else (0, 165, 255)
+            tpl_color = (60, 220, 60) if obj_measurement.str_category == "particle" else (
+                0, 165, 255)
             arr_overlay[arr_mask > 0] = (
                 arr_overlay[arr_mask > 0].astype(np.float32) * 0.55
                 + np.array(tpl_color, dtype=np.float32) * 0.45
@@ -442,7 +483,8 @@ class Sam2AspectRatioService:
             if arr_contour is None:
                 continue
 
-            tpl_color = (0, 255, 0) if obj_measurement.str_category == "particle" else (0, 140, 255)
+            tpl_color = (0, 255, 0) if obj_measurement.str_category == "particle" else (
+                0, 140, 255)
             cv2.drawContours(arr_overlay, [arr_contour], -1, tpl_color, 1)
             cv2.rectangle(
                 arr_overlay,
@@ -481,8 +523,10 @@ class Sam2AspectRatioService:
 
     def build_summary(self, list_objects: tp.List[ObjectMeasurement]) -> tp.Dict[str, tp.Any]:
         """요약 통계 생성."""
-        list_particles = [obj_item for obj_item in list_objects if obj_item.str_category == "particle"]
-        list_fragments = [obj_item for obj_item in list_objects if obj_item.str_category == "fragment"]
+        list_particles = [
+            obj_item for obj_item in list_objects if obj_item.str_category == "particle"]
+        list_fragments = [
+            obj_item for obj_item in list_objects if obj_item.str_category == "fragment"]
         list_particleArs = [
             obj_item.float_aspectRatioWH
             for obj_item in list_particles
@@ -497,6 +541,7 @@ class Sam2AspectRatioService:
             "model_weights_path": str(self.obj_config.path_modelWeights),
             "model_weights_resolved_name": self.resolve_model_weights_path().name,
             "model_name": self.dict_modelConfig.get("model", self.obj_config.path_modelWeights.stem),
+            "bbox_edge_margin": int(self.obj_config.int_bboxEdgeMargin),
             "particle_area_threshold": float(self.obj_config.float_particleAreaThreshold),
             "mask_binarize_threshold": float(self.obj_config.float_maskBinarizeThreshold),
             "min_valid_mask_area": int(self.obj_config.int_minValidMaskArea),
@@ -554,24 +599,31 @@ class Sam2AspectRatioService:
             2,
         )
 
-        cv2.imwrite(str(self.obj_config.path_outputDir / "01_input.png"), arr_inputBgr)
-        cv2.imwrite(str(self.obj_config.path_outputDir / "02_input_roi.png"), arr_inputRoiBgr)
-        cv2.imwrite(str(self.obj_config.path_outputDir / "03_overlay_roi.png"), arr_overlayRoi)
-        cv2.imwrite(str(self.obj_config.path_outputDir / "04_overlay_full.png"), arr_overlayFull)
+        cv2.imwrite(str(self.obj_config.path_outputDir /
+                    "01_input.png"), arr_inputBgr)
+        cv2.imwrite(str(self.obj_config.path_outputDir /
+                    "02_input_roi.png"), arr_inputRoiBgr)
+        cv2.imwrite(str(self.obj_config.path_outputDir /
+                    "03_overlay_roi.png"), arr_overlayRoi)
+        cv2.imwrite(str(self.obj_config.path_outputDir /
+                    "04_overlay_full.png"), arr_overlayFull)
 
         path_csvAll = self.obj_config.path_outputDir / "objects.csv"
         with path_csvAll.open("w", newline="", encoding="utf-8-sig") as obj_f:
             if list_objects:
-                obj_writer = csv.DictWriter(obj_f, fieldnames=list(asdict(list_objects[0]).keys()))
+                obj_writer = csv.DictWriter(
+                    obj_f, fieldnames=list(asdict(list_objects[0]).keys()))
                 obj_writer.writeheader()
                 for obj_measurement in list_objects:
                     obj_writer.writerow(asdict(obj_measurement))
 
-        list_particleRows = [asdict(obj_item) for obj_item in list_objects if obj_item.str_category == "particle"]
+        list_particleRows = [asdict(
+            obj_item) for obj_item in list_objects if obj_item.str_category == "particle"]
         path_csvParticle = self.obj_config.path_outputDir / "particles.csv"
         with path_csvParticle.open("w", newline="", encoding="utf-8-sig") as obj_f:
             if list_particleRows:
-                obj_writer = csv.DictWriter(obj_f, fieldnames=list(list_particleRows[0].keys()))
+                obj_writer = csv.DictWriter(
+                    obj_f, fieldnames=list(list_particleRows[0].keys()))
                 obj_writer.writeheader()
                 for dict_row in list_particleRows:
                     obj_writer.writerow(dict_row)
@@ -580,7 +632,8 @@ class Sam2AspectRatioService:
             json.dump(dict_summary, obj_f, ensure_ascii=False, indent=2)
 
         with (self.obj_config.path_outputDir / "objects.json").open("w", encoding="utf-8") as obj_f:
-            json.dump([asdict(obj_item) for obj_item in list_objects], obj_f, ensure_ascii=False, indent=2)
+            json.dump([asdict(obj_item) for obj_item in list_objects],
+                      obj_f, ensure_ascii=False, indent=2)
 
         if not self.obj_config.bool_saveIndividualMasks:
             return
@@ -597,7 +650,8 @@ class Sam2AspectRatioService:
                 else path_fragmentMaskDir
             )
             str_fileName = f"{obj_measurement.str_category}_{obj_measurement.int_index:04d}.png"
-            cv2.imwrite(str(path_targetDir / str_fileName), arr_mask.astype(np.uint8) * 255)
+            cv2.imwrite(str(path_targetDir / str_fileName),
+                        arr_mask.astype(np.uint8) * 255)
 
     def process(self) -> Sam2AspectRatioResult:
         """전체 파이프라인 실행."""
@@ -613,14 +667,17 @@ class Sam2AspectRatioService:
             if arr_scores is not None and int_index < len(arr_scores):
                 float_confidence = float(arr_scores[int_index])
 
-            obj_measurement = self.measure_mask(arr_mask, int_index=int_index, float_confidence=float_confidence)
+            obj_measurement = self.measure_mask(
+                arr_mask, int_index=int_index, float_confidence=float_confidence)
             if obj_measurement is None:
                 continue
 
             list_objects.append(obj_measurement)
-            list_validMasks.append(self.refine_mask_for_area(arr_mask).astype(np.uint8))
+            list_validMasks.append(
+                self.refine_mask_for_area(arr_mask).astype(np.uint8))
 
-        arr_overlay = self.create_overlay(arr_inputRoiBgr, list_objects, list_validMasks)
+        arr_overlay = self.create_overlay(
+            arr_inputRoiBgr, list_objects, list_validMasks)
         dict_summary = self.build_summary(list_objects)
         dict_summary["roi"] = dict_roi
         self.save_outputs(
@@ -639,50 +696,123 @@ class Sam2AspectRatioService:
         )
 
 
-def collect_input_images(path_input: Path) -> tp.List[Path]:
-    """입력이 파일인지 디렉터리인지 판별해 처리 대상 이미지 목록을 수집."""
+def collect_input_groups(path_input: Path) -> tp.List[tp.Tuple[str, tp.List[Path]]]:
+    """입력 경로에서 처리 대상 이미지 그룹을 수집."""
     if not path_input.exists():
         raise FileNotFoundError(f"입력 경로를 찾을 수 없습니다: {path_input}")
 
     if path_input.is_file():
-        return [path_input]
+        return [(path_input.stem, [path_input])]
 
-    list_imagePaths = sorted(
+    list_groupDirs = sorted([path_item for path_item in path_input.iterdir() if path_item.is_dir()])
+    list_groupedImages: tp.List[tp.Tuple[str, tp.List[Path]]] = []
+
+    for path_groupDir in list_groupDirs:
+        list_imagePaths = sorted(
+            [
+                path_item
+                for path_item in path_groupDir.iterdir()
+                if path_item.is_file() and path_item.suffix.lower() in CONST_SUPPORTED_IMAGE_SUFFIXES
+            ]
+        )
+        if not list_imagePaths:
+            continue
+        list_groupedImages.append((path_groupDir.name, list_imagePaths))
+
+    if list_groupedImages:
+        return list_groupedImages
+
+    # 하위 IMG_ID 폴더가 없는 경우에는 기존 단일 디렉터리 flat 구조도 지원한다.
+    list_rootImages = sorted(
         [
             path_item
             for path_item in path_input.iterdir()
             if path_item.is_file() and path_item.suffix.lower() in CONST_SUPPORTED_IMAGE_SUFFIXES
         ]
     )
-    if not list_imagePaths:
-        raise FileNotFoundError(f"디렉터리에서 처리할 이미지 파일을 찾지 못했습니다: {path_input}")
-    return list_imagePaths
+    if list_rootImages:
+        return [(path_input.name, list_rootImages)]
+
+    raise FileNotFoundError(f"디렉터리에서 처리할 이미지 파일을 찾지 못했습니다: {path_input}")
 
 
-def build_image_output_dir(path_outputRoot: Path, path_image: Path, bool_isBatch: bool) -> Path:
+def build_image_output_dir(
+    path_outputRoot: Path,
+    str_groupId: str,
+    path_image: Path,
+    bool_isBatch: bool,
+) -> Path:
     """단일 이미지 / 배치 입력에 맞는 출력 폴더 경로 구성."""
     if not bool_isBatch:
         return path_outputRoot
     str_dirName = f"{path_image.stem}{path_image.suffix.lower().replace('.', '_')}"
-    return path_outputRoot / str_dirName
+    return path_outputRoot / str_groupId / str_dirName
+
+
+def calculate_mean_from_optional_values(
+    list_values: tp.Iterable[tp.Optional[float]],
+) -> tp.Optional[float]:
+    """None 을 제외한 평균 계산."""
+    list_validValues = [float(x) for x in list_values if x is not None]
+    if not list_validValues:
+        return None
+    return float(np.mean(np.array(list_validValues, dtype=np.float32)))
+
+
+def build_img_id_summary(
+    str_imgId: str,
+    path_outputRoot: Path,
+    list_fileSummaries: tp.List[tp.Dict[str, tp.Any]],
+) -> tp.Dict[str, tp.Any]:
+    """IMG_ID 폴더 단위 요약 생성."""
+    float_meanAspectRatio = calculate_mean_from_optional_values(
+        dict_item.get("particle_aspect_ratio_mean") for dict_item in list_fileSummaries
+    )
+    float_meanFragmentCount = calculate_mean_from_optional_values(
+        float(dict_item.get("fragment_count", 0)) for dict_item in list_fileSummaries
+    )
+
+    return {
+        "img_id": str_imgId,
+        "output_dir": str(path_outputRoot / str_imgId),
+        "num_images": len(list_fileSummaries),
+        "num_total_objects": int(sum(dict_item.get("num_total_objects", 0) for dict_item in list_fileSummaries)),
+        "num_particles": int(sum(dict_item.get("num_particles", 0) for dict_item in list_fileSummaries)),
+        "num_fragments": int(sum(dict_item.get("num_fragments", 0) for dict_item in list_fileSummaries)),
+        "fragment_count_total": int(sum(dict_item.get("fragment_count", 0) for dict_item in list_fileSummaries)),
+        "fragment_count_mean_per_image": float_meanFragmentCount,
+        "particle_aspect_ratio_mean": float_meanAspectRatio,
+        "files": list_fileSummaries,
+    }
 
 
 def build_batch_summary(
     path_input: Path,
     path_outputDir: Path,
-    list_imagePaths: tp.List[Path],
-    list_fileSummaries: tp.List[tp.Dict[str, tp.Any]],
+    list_groupSummaries: tp.List[tp.Dict[str, tp.Any]],
 ) -> tp.Dict[str, tp.Any]:
     """디렉터리 입력용 통합 요약 생성."""
+    float_meanAspectRatioByImgId = calculate_mean_from_optional_values(
+        dict_item.get("particle_aspect_ratio_mean") for dict_item in list_groupSummaries
+    )
+    float_meanFragmentCountByImgId = calculate_mean_from_optional_values(
+        dict_item.get("fragment_count_mean_per_image") for dict_item in list_groupSummaries
+    )
+
     return {
         "input_path": str(path_input),
         "output_dir": str(path_outputDir),
-        "num_images": len(list_imagePaths),
-        "num_total_objects": int(sum(dict_item.get("num_total_objects", 0) for dict_item in list_fileSummaries)),
-        "num_particles": int(sum(dict_item.get("num_particles", 0) for dict_item in list_fileSummaries)),
-        "num_fragments": int(sum(dict_item.get("num_fragments", 0) for dict_item in list_fileSummaries)),
-        "fragment_count": int(sum(dict_item.get("fragment_count", 0) for dict_item in list_fileSummaries)),
-        "files": list_fileSummaries,
+        "num_img_ids": len(list_groupSummaries),
+        "num_images": int(sum(dict_item.get("num_images", 0) for dict_item in list_groupSummaries)),
+        "num_total_objects": int(sum(dict_item.get("num_total_objects", 0) for dict_item in list_groupSummaries)),
+        "num_particles": int(sum(dict_item.get("num_particles", 0) for dict_item in list_groupSummaries)),
+        "num_fragments": int(sum(dict_item.get("num_fragments", 0) for dict_item in list_groupSummaries)),
+        "fragment_count_total": int(sum(dict_item.get("fragment_count_total", 0) for dict_item in list_groupSummaries)),
+        "fragment_count": float_meanFragmentCountByImgId,
+        "fragment_count_mean_per_img_id": float_meanFragmentCountByImgId,
+        "particle_aspect_ratio_mean": float_meanAspectRatioByImgId,
+        "particle_aspect_ratio_mean_per_img_id": float_meanAspectRatioByImgId,
+        "img_ids": list_groupSummaries,
     }
 
 
@@ -695,6 +825,7 @@ def run_sam2_aspect_ratio(
     int_roiYMin: int = CONST_ROI_Y_MIN,
     int_roiXMax: int = CONST_ROI_X_MAX,
     int_roiYMax: int = CONST_ROI_Y_MAX,
+    int_bboxEdgeMargin: int = CONST_BBOX_EDGE_MARGIN,
     float_particleAreaThreshold: float = CONST_PARTICLE_AREA_THRESHOLD,
     float_maskBinarizeThreshold: float = CONST_MASK_BINARIZE_THRESHOLD,
     int_minValidMaskArea: int = CONST_MIN_VALID_MASK_AREA,
@@ -709,19 +840,21 @@ def run_sam2_aspect_ratio(
     """외부 호출용 헬퍼 함수."""
     path_input = Path(str_input)
     path_outputRoot = Path(str_outputDir)
-    list_imagePaths = collect_input_images(path_input)
+    list_inputGroups = collect_input_groups(path_input)
     bool_isBatch = path_input.is_dir()
 
-    def create_config(path_image: Path) -> Sam2AspectRatioConfig:
+    def create_config(str_groupId: str, path_image: Path) -> Sam2AspectRatioConfig:
         return Sam2AspectRatioConfig(
             path_input=path_image,
-            path_outputDir=build_image_output_dir(path_outputRoot, path_image, bool_isBatch),
+            path_outputDir=build_image_output_dir(
+                path_outputRoot, str_groupId, path_image, bool_isBatch),
             path_modelConfig=Path(str_modelConfig),
             path_modelWeights=Path(str_modelWeights),
             int_roiXMin=int_roiXMin,
             int_roiYMin=int_roiYMin,
             int_roiXMax=int_roiXMax,
             int_roiYMax=int_roiYMax,
+            int_bboxEdgeMargin=int_bboxEdgeMargin,
             float_particleAreaThreshold=float_particleAreaThreshold,
             float_maskBinarizeThreshold=float_maskBinarizeThreshold,
             int_minValidMaskArea=int_minValidMaskArea,
@@ -735,32 +868,47 @@ def run_sam2_aspect_ratio(
         )
 
     if not bool_isBatch:
-        obj_service = Sam2AspectRatioService(create_config(list_imagePaths[0]))
+        str_groupId, list_imagePaths = list_inputGroups[0]
+        obj_service = Sam2AspectRatioService(create_config(str_groupId, list_imagePaths[0]))
         obj_result = obj_service.process()
         return obj_result.dict_summary
 
     path_outputRoot.mkdir(parents=True, exist_ok=True)
 
-    obj_sharedService = Sam2AspectRatioService(create_config(list_imagePaths[0]))
+    str_firstGroupId, list_firstGroupImages = list_inputGroups[0]
+    obj_sharedService = Sam2AspectRatioService(
+        create_config(str_firstGroupId, list_firstGroupImages[0]))
     obj_sharedService.initialize_model()
 
-    list_fileSummaries: tp.List[tp.Dict[str, tp.Any]] = []
-    for path_image in list_imagePaths:
-        obj_service = Sam2AspectRatioService(create_config(path_image))
-        obj_service.obj_model = obj_sharedService.obj_model
-        obj_service.dict_modelConfig = dict(obj_sharedService.dict_modelConfig)
-        obj_result = obj_service.process()
+    list_groupSummaries: tp.List[tp.Dict[str, tp.Any]] = []
+    for str_groupId, list_imagePaths in list_inputGroups:
+        list_fileSummaries: tp.List[tp.Dict[str, tp.Any]] = []
 
-        dict_fileSummary = dict(obj_result.dict_summary)
-        dict_fileSummary["image_name"] = path_image.name
-        dict_fileSummary["image_path"] = str(path_image)
-        list_fileSummaries.append(dict_fileSummary)
+        for path_image in list_imagePaths:
+            obj_service = Sam2AspectRatioService(create_config(str_groupId, path_image))
+            obj_service.obj_model = obj_sharedService.obj_model
+            obj_service.dict_modelConfig = dict(obj_sharedService.dict_modelConfig)
+            obj_result = obj_service.process()
+
+            dict_fileSummary = dict(obj_result.dict_summary)
+            dict_fileSummary["img_id"] = str_groupId
+            dict_fileSummary["image_name"] = path_image.name
+            dict_fileSummary["image_path"] = str(path_image)
+            list_fileSummaries.append(dict_fileSummary)
+
+        dict_groupSummary = build_img_id_summary(
+            str_imgId=str_groupId,
+            path_outputRoot=path_outputRoot,
+            list_fileSummaries=list_fileSummaries,
+        )
+        with (path_outputRoot / str_groupId / "img_id_summary.json").open("w", encoding="utf-8") as obj_f:
+            json.dump(dict_groupSummary, obj_f, ensure_ascii=False, indent=2)
+        list_groupSummaries.append(dict_groupSummary)
 
     dict_batchSummary = build_batch_summary(
         path_input=path_input,
         path_outputDir=path_outputRoot,
-        list_imagePaths=list_imagePaths,
-        list_fileSummaries=list_fileSummaries,
+        list_groupSummaries=list_groupSummaries,
     )
     with (path_outputRoot / "batch_summary.json").open("w", encoding="utf-8") as obj_f:
         json.dump(dict_batchSummary, obj_f, ensure_ascii=False, indent=2)
@@ -816,6 +964,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=CONST_ROI_Y_MAX,
         help="SAM2 추론 ROI의 끝 y 좌표",
+    )
+    obj_parser.add_argument(
+        "--bbox_edge_margin",
+        type=int,
+        default=CONST_BBOX_EDGE_MARGIN,
+        help="ROI 경계와 이 margin 이내인 bbox는 제외",
     )
     obj_parser.add_argument(
         "--area_threshold",
@@ -894,6 +1048,7 @@ def main() -> None:
         int_roiYMin=obj_args.roi_y_min,
         int_roiXMax=obj_args.roi_x_max,
         int_roiYMax=obj_args.roi_y_max,
+        int_bboxEdgeMargin=obj_args.bbox_edge_margin,
         float_particleAreaThreshold=obj_args.area_threshold,
         float_maskBinarizeThreshold=obj_args.mask_binarize_threshold,
         int_minValidMaskArea=obj_args.min_valid_mask_area,
