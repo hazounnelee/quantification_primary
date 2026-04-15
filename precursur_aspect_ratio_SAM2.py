@@ -332,6 +332,184 @@ def iter_chunks(
         yield list_items[int_idx:int_idx + int_chunkSize]
 
 
+def load_particle_mean_sizes_from_csv(path_particlesCsv: Path) -> np.ndarray:
+    """particles.csv에서 각 particle의 평균 길이 (가로+세로)/2 를 읽어온다."""
+    if not path_particlesCsv.exists():
+        return np.array([], dtype=np.float32)
+
+    list_meanSizes: tp.List[float] = []
+    with path_particlesCsv.open("r", newline="", encoding="utf-8-sig") as obj_f:
+        obj_reader = csv.DictReader(obj_f)
+        for dict_row in obj_reader:
+            try:
+                float_horizontal = float(dict_row["int_longestHorizontal"])
+                float_vertical = float(dict_row["int_longestVertical"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            list_meanSizes.append((float_horizontal + float_vertical) / 2.0)
+
+    if not list_meanSizes:
+        return np.array([], dtype=np.float32)
+    return np.array(list_meanSizes, dtype=np.float32)
+
+
+def save_particle_distribution_histogram(
+    path_particlesCsv: Path,
+    path_outputImage: Path,
+) -> None:
+    """particles.csv 기준 particle 평균 길이 분포 histogram 이미지를 저장한다."""
+    arr_meanSizes = load_particle_mean_sizes_from_csv(path_particlesCsv)
+
+    int_imgWidth = 960
+    int_imgHeight = 640
+    arr_canvas = np.full((int_imgHeight, int_imgWidth, 3), 255, dtype=np.uint8)
+
+    int_marginLeft = 90
+    int_marginRight = 40
+    int_marginTop = 60
+    int_marginBottom = 90
+    int_plotWidth = int_imgWidth - int_marginLeft - int_marginRight
+    int_plotHeight = int_imgHeight - int_marginTop - int_marginBottom
+
+    cv2.putText(
+        arr_canvas,
+        "Particle Size Distribution",
+        (int_marginLeft, 35),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.9,
+        (20, 20, 20),
+        2,
+        cv2.LINE_AA,
+    )
+
+    cv2.line(
+        arr_canvas,
+        (int_marginLeft, int_marginTop + int_plotHeight),
+        (int_marginLeft + int_plotWidth, int_marginTop + int_plotHeight),
+        (0, 0, 0),
+        2,
+    )
+    cv2.line(
+        arr_canvas,
+        (int_marginLeft, int_marginTop),
+        (int_marginLeft, int_marginTop + int_plotHeight),
+        (0, 0, 0),
+        2,
+    )
+
+    if arr_meanSizes.size == 0:
+        cv2.putText(
+            arr_canvas,
+            "No particle data in particles.csv",
+            (int_marginLeft + 110, int_marginTop + int_plotHeight // 2),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (80, 80, 80),
+            2,
+            cv2.LINE_AA,
+        )
+        cv2.imwrite(str(path_outputImage), arr_canvas)
+        return
+
+    int_numBins = int(np.clip(np.sqrt(arr_meanSizes.size), 5, 20))
+    float_minValue = float(np.min(arr_meanSizes))
+    float_maxValue = float(np.max(arr_meanSizes))
+    if abs(float_maxValue - float_minValue) < 1e-6:
+        float_minValue -= 0.5
+        float_maxValue += 0.5
+
+    arr_histCounts, arr_binEdges = np.histogram(
+        arr_meanSizes,
+        bins=int_numBins,
+        range=(float_minValue, float_maxValue),
+    )
+
+    int_maxCount = int(max(1, arr_histCounts.max()))
+    int_barGap = 6
+    int_barWidth = max(8, int((int_plotWidth - int_barGap * (int_numBins - 1)) / max(1, int_numBins)))
+    tpl_barColor = (80, 140, 240)
+
+    for int_binIdx, int_count in enumerate(arr_histCounts):
+        int_x1 = int_marginLeft + int_binIdx * (int_barWidth + int_barGap)
+        int_x2 = min(int_x1 + int_barWidth, int_marginLeft + int_plotWidth)
+        int_barHeight = int(round((int_count / int_maxCount) * (int_plotHeight - 20)))
+        int_y1 = int_marginTop + int_plotHeight - int_barHeight
+        int_y2 = int_marginTop + int_plotHeight
+
+        cv2.rectangle(arr_canvas, (int_x1, int_y1), (int_x2, int_y2), tpl_barColor, -1)
+        cv2.rectangle(arr_canvas, (int_x1, int_y1), (int_x2, int_y2), (50, 50, 50), 1)
+
+        str_countLabel = str(int_count)
+        cv2.putText(
+            arr_canvas,
+            str_countLabel,
+            (int_x1, max(int_marginTop + 15, int_y1 - 6)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (40, 40, 40),
+            1,
+            cv2.LINE_AA,
+        )
+
+        float_binCenter = float((arr_binEdges[int_binIdx] + arr_binEdges[int_binIdx + 1]) / 2.0)
+        str_xLabel = f"{float_binCenter:.1f}"
+        cv2.putText(
+            arr_canvas,
+            str_xLabel,
+            (int_x1, int_marginTop + int_plotHeight + 24),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.38,
+            (40, 40, 40),
+            1,
+            cv2.LINE_AA,
+        )
+
+    for int_tick in range(5):
+        float_ratio = int_tick / 4.0
+        int_tickY = int_marginTop + int(round((1.0 - float_ratio) * int_plotHeight))
+        int_tickValue = int(round(float_ratio * int_maxCount))
+        cv2.line(
+            arr_canvas,
+            (int_marginLeft - 8, int_tickY),
+            (int_marginLeft, int_tickY),
+            (0, 0, 0),
+            1,
+        )
+        cv2.putText(
+            arr_canvas,
+            str(int_tickValue),
+            (20, int_tickY + 5),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (40, 40, 40),
+            1,
+            cv2.LINE_AA,
+        )
+
+    cv2.putText(
+        arr_canvas,
+        "Mean of longest horizontal and vertical length (pixel)",
+        (int_marginLeft, int_imgHeight - 28),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.52,
+        (20, 20, 20),
+        1,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        arr_canvas,
+        "Count",
+        (18, int_marginTop - 14),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.52,
+        (20, 20, 20),
+        1,
+        cv2.LINE_AA,
+    )
+
+    cv2.imwrite(str(path_outputImage), arr_canvas)
+
+
 class Sam2AspectRatioService:
     """SAM2 추론 및 후처리를 담당하는 서비스 클래스."""
 
@@ -995,6 +1173,11 @@ class Sam2AspectRatioService:
                 obj_writer.writeheader()
                 for dict_row in list_particleRows:
                     obj_writer.writerow(dict_row)
+
+        save_particle_distribution_histogram(
+            path_particlesCsv=path_csvParticle,
+            path_outputImage=self.obj_config.path_outputDir / "particle_dist.png",
+        )
 
         with (self.obj_config.path_outputDir / "summary.json").open("w", encoding="utf-8") as obj_f:
             json.dump(dict_summary, obj_f, ensure_ascii=False, indent=2)
