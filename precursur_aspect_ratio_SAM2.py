@@ -46,6 +46,9 @@ CONST_PARTICLE_AREA_THRESHOLD: float = 1500.0
 CONST_SCALE_PIXELS: float = 276.0
 CONST_SCALE_MICROMETERS: float = 50.0
 CONST_MICROMETER_PER_PIXEL: float = CONST_SCALE_MICROMETERS / CONST_SCALE_PIXELS
+CONST_SMALL_PARTICLE_SCALE_PIXELS: float = 184.0
+CONST_SMALL_PARTICLE_SCALE_MICROMETERS: float = 10.0
+CONST_DEFAULT_SMALL_PARTICLE: bool = False
 
 # ROI 가장자리와 가까운 bbox를 제외하기 위한 margin
 CONST_BBOX_EDGE_MARGIN: int = 8
@@ -127,6 +130,9 @@ class Sam2AspectRatioConfig:
     float_bboxDedupIou: float = CONST_DEFAULT_BBOX_DEDUP_IOU
     bool_multimaskOutput: bool = CONST_DEFAULT_MULTIMASK_OUTPUT
     bool_usePointPrompts: bool = CONST_DEFAULT_USE_POINT_PROMPTS
+    bool_smallParticle: bool = CONST_DEFAULT_SMALL_PARTICLE
+    float_scalePixels: float = CONST_SCALE_PIXELS
+    float_scaleMicrometers: float = CONST_SCALE_MICROMETERS
     str_device: tp.Optional[str] = None
     bool_retinaMasks: bool = CONST_DEFAULT_RETINA_MASKS
     bool_saveIndividualMasks: bool = CONST_DEFAULT_SAVE_INDIVIDUAL_MASKS
@@ -174,9 +180,15 @@ def normalize_image_to_uint8(arr_img: np.ndarray) -> np.ndarray:
     return (arr_out * 255.0).clip(0, 255).astype(np.uint8)
 
 
-def convert_pixels_to_micrometers(float_pixels: float) -> float:
+def convert_pixels_to_micrometers(
+    float_pixels: float,
+    float_scalePixels: float = CONST_SCALE_PIXELS,
+    float_scaleMicrometers: float = CONST_SCALE_MICROMETERS,
+) -> float:
     """픽셀 길이를 마이크로미터 길이로 환산."""
-    return float(float_pixels * CONST_MICROMETER_PER_PIXEL)
+    if float_scalePixels <= 0.0:
+        return 0.0
+    return float(float_pixels * (float_scaleMicrometers / float_scalePixels))
 
 
 def create_processing_tiles(
@@ -1000,6 +1012,14 @@ class Sam2AspectRatioService:
             int_margin=self.obj_config.int_bboxEdgeMargin,
         )
 
+    def convert_pixels_to_micrometers(self, float_pixels: float) -> float:
+        """현재 config의 scale 기준으로 픽셀 길이를 um로 환산."""
+        return convert_pixels_to_micrometers(
+            float_pixels=float_pixels,
+            float_scalePixels=self.obj_config.float_scalePixels,
+            float_scaleMicrometers=self.obj_config.float_scaleMicrometers,
+        )
+
     def measure_mask(
         self,
         arr_mask: np.ndarray,
@@ -1060,14 +1080,14 @@ class Sam2AspectRatioService:
             int_bboxY=int(int_y),
             int_bboxWidth=int(int_w),
             int_bboxHeight=int(int_h),
-            float_bboxWidthUm=convert_pixels_to_micrometers(float(int_w)),
-            float_bboxHeightUm=convert_pixels_to_micrometers(float(int_h)),
+            float_bboxWidthUm=self.convert_pixels_to_micrometers(float(int_w)),
+            float_bboxHeightUm=self.convert_pixels_to_micrometers(float(int_h)),
             float_centroidX=float_cx,
             float_centroidY=float_cy,
             int_longestHorizontal=int_horizontal,
             int_longestVertical=int_vertical,
-            float_longestHorizontalUm=convert_pixels_to_micrometers(float(int_horizontal)),
-            float_longestVerticalUm=convert_pixels_to_micrometers(float(int_vertical)),
+            float_longestHorizontalUm=self.convert_pixels_to_micrometers(float(int_horizontal)),
+            float_longestVerticalUm=self.convert_pixels_to_micrometers(float(int_vertical)),
             float_aspectRatioWH=float_aspectRatio,
         )
 
@@ -1145,6 +1165,11 @@ class Sam2AspectRatioService:
             for obj_item in list_particles
             if obj_item.float_aspectRatioWH is not None
         ]
+        float_micrometersPerPixel = convert_pixels_to_micrometers(
+            float_pixels=1.0,
+            float_scalePixels=self.obj_config.float_scalePixels,
+            float_scaleMicrometers=self.obj_config.float_scaleMicrometers,
+        )
 
         dict_summary: tp.Dict[str, tp.Any] = {
             "input_path": str(self.obj_config.path_input),
@@ -1154,9 +1179,10 @@ class Sam2AspectRatioService:
             "model_weights_path": str(self.obj_config.path_modelWeights),
             "model_weights_resolved_name": self.resolve_model_weights_path().name,
             "model_name": self.dict_modelConfig.get("model", self.obj_config.path_modelWeights.stem),
-            "scale_pixels": float(CONST_SCALE_PIXELS),
-            "scale_micrometers": float(CONST_SCALE_MICROMETERS),
-            "micrometers_per_pixel": float(CONST_MICROMETER_PER_PIXEL),
+            "small_particle": bool(self.obj_config.bool_smallParticle),
+            "scale_pixels": float(self.obj_config.float_scalePixels),
+            "scale_micrometers": float(self.obj_config.float_scaleMicrometers),
+            "micrometers_per_pixel": float(float_micrometersPerPixel),
             "bbox_edge_margin": int(self.obj_config.int_bboxEdgeMargin),
             "tile_edge_margin": int(self.obj_config.int_tileEdgeMargin),
             "tile_size": int(self.obj_config.int_tileSize),
@@ -1522,6 +1548,7 @@ def run_sam2_aspect_ratio(
     float_bboxDedupIou: float = CONST_DEFAULT_BBOX_DEDUP_IOU,
     bool_multimaskOutput: bool = CONST_DEFAULT_MULTIMASK_OUTPUT,
     bool_usePointPrompts: bool = CONST_DEFAULT_USE_POINT_PROMPTS,
+    bool_smallParticle: bool = CONST_DEFAULT_SMALL_PARTICLE,
     str_device: tp.Optional[str] = None,
     bool_retinaMasks: bool = CONST_DEFAULT_RETINA_MASKS,
     bool_saveIndividualMasks: bool = CONST_DEFAULT_SAVE_INDIVIDUAL_MASKS,
@@ -1531,6 +1558,8 @@ def run_sam2_aspect_ratio(
     path_outputRoot = Path(str_outputDir)
     list_inputGroups = collect_input_groups(path_input)
     bool_isBatch = path_input.is_dir()
+    float_scalePixels = CONST_SMALL_PARTICLE_SCALE_PIXELS if bool_smallParticle else CONST_SCALE_PIXELS
+    float_scaleMicrometers = CONST_SMALL_PARTICLE_SCALE_MICROMETERS if bool_smallParticle else CONST_SCALE_MICROMETERS
 
     def create_config(str_groupId: str, path_image: Path) -> Sam2AspectRatioConfig:
         return Sam2AspectRatioConfig(
@@ -1562,6 +1591,9 @@ def run_sam2_aspect_ratio(
             float_bboxDedupIou=float_bboxDedupIou,
             bool_multimaskOutput=bool_multimaskOutput,
             bool_usePointPrompts=bool_usePointPrompts,
+            bool_smallParticle=bool_smallParticle,
+            float_scalePixels=float_scalePixels,
+            float_scaleMicrometers=float_scaleMicrometers,
             str_device=str_device,
             bool_retinaMasks=bool_retinaMasks,
             bool_saveIndividualMasks=bool_saveIndividualMasks,
@@ -1828,6 +1860,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="opencv 후보점 기반 point prompt 추론 사용 여부",
     )
     obj_parser.add_argument(
+        "--small_particle",
+        action="store_true",
+        help="길이 환산 scale을 184 pixel = 10 um 기준으로 변경",
+    )
+    obj_parser.add_argument(
         "--save_mask_imgs",
         "--save_individual_masks",
         dest="save_mask_imgs",
@@ -1870,6 +1907,7 @@ def main() -> None:
         float_bboxDedupIou=obj_args.bbox_dedup_iou,
         bool_multimaskOutput=obj_args.multimask_output,
         bool_usePointPrompts=obj_args.use_point_prompts,
+        bool_smallParticle=obj_args.small_particle,
         str_device=obj_args.device,
         bool_retinaMasks=obj_args.retina_masks,
         bool_saveIndividualMasks=obj_args.save_mask_imgs,
