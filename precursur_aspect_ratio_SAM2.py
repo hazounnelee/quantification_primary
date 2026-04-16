@@ -42,6 +42,11 @@ from ultralytics import SAM
 # `particle` / `fragment` 분류 기준 면적
 CONST_PARTICLE_AREA_THRESHOLD: float = 1500.0
 
+# 길이 단위 환산 배율: 276 pixel = 50 um
+CONST_SCALE_PIXELS: float = 276.0
+CONST_SCALE_MICROMETERS: float = 50.0
+CONST_MICROMETER_PER_PIXEL: float = CONST_SCALE_MICROMETERS / CONST_SCALE_PIXELS
+
 # ROI 가장자리와 가까운 bbox를 제외하기 위한 margin
 CONST_BBOX_EDGE_MARGIN: int = 8
 CONST_TILE_EDGE_MARGIN: int = 8
@@ -139,10 +144,14 @@ class ObjectMeasurement:
     int_bboxY: int
     int_bboxWidth: int
     int_bboxHeight: int
+    float_bboxWidthUm: float
+    float_bboxHeightUm: float
     float_centroidX: float
     float_centroidY: float
     int_longestHorizontal: int
     int_longestVertical: int
+    float_longestHorizontalUm: float
+    float_longestVerticalUm: float
     float_aspectRatioWH: tp.Optional[float]
 
 
@@ -165,6 +174,11 @@ def normalize_image_to_uint8(arr_img: np.ndarray) -> np.ndarray:
     return (arr_out * 255.0).clip(0, 255).astype(np.uint8)
 
 
+def convert_pixels_to_micrometers(float_pixels: float) -> float:
+    """픽셀 길이를 마이크로미터 길이로 환산."""
+    return float(float_pixels * CONST_MICROMETER_PER_PIXEL)
+
+
 def create_processing_tiles(
     int_x1: int,
     int_y1: int,
@@ -179,8 +193,10 @@ def create_processing_tiles(
         list_tiles.append((int_x1, int_y1, int_x2, int_y2))
         return list_tiles
 
-    list_xs = list(range(int_x1, max(int_x1 + 1, int_x2 - int_tileSize + 1), int_stride))
-    list_ys = list(range(int_y1, max(int_y1 + 1, int_y2 - int_tileSize + 1), int_stride))
+    list_xs = list(
+        range(int_x1, max(int_x1 + 1, int_x2 - int_tileSize + 1), int_stride))
+    list_ys = list(
+        range(int_y1, max(int_y1 + 1, int_y2 - int_tileSize + 1), int_stride))
 
     if list_xs and list_xs[-1] != int_x2 - int_tileSize:
         list_xs.append(max(int_x1, int_x2 - int_tileSize))
@@ -251,10 +267,12 @@ def sample_interest_points(
             list_scoredPoints.append((int_x, int_y, float_score))
 
     if len(list_scoredPoints) < max(8, int_maxPoints // 2):
-        _, arr_th = cv2.threshold(arr_enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        _, arr_th = cv2.threshold(
+            arr_enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         arr_kernelOpen = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
         arr_th = cv2.morphologyEx(arr_th, cv2.MORPH_OPEN, arr_kernelOpen)
-        list_cnts, _ = cv2.findContours(arr_th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        list_cnts, _ = cv2.findContours(
+            arr_th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         for arr_cnt in sorted(list_cnts, key=cv2.contourArea, reverse=True):
             float_area = float(cv2.contourArea(arr_cnt))
             if float_area < 4.0 or float_area > 400.0:
@@ -426,18 +444,22 @@ def save_particle_distribution_histogram(
 
     int_maxCount = int(max(1, arr_histCounts.max()))
     int_barGap = 6
-    int_barWidth = max(8, int((int_plotWidth - int_barGap * (int_numBins - 1)) / max(1, int_numBins)))
+    int_barWidth = max(
+        8, int((int_plotWidth - int_barGap * (int_numBins - 1)) / max(1, int_numBins)))
     tpl_barColor = (80, 140, 240)
 
     for int_binIdx, int_count in enumerate(arr_histCounts):
         int_x1 = int_marginLeft + int_binIdx * (int_barWidth + int_barGap)
         int_x2 = min(int_x1 + int_barWidth, int_marginLeft + int_plotWidth)
-        int_barHeight = int(round((int_count / int_maxCount) * (int_plotHeight - 20)))
+        int_barHeight = int(
+            round((int_count / int_maxCount) * (int_plotHeight - 20)))
         int_y1 = int_marginTop + int_plotHeight - int_barHeight
         int_y2 = int_marginTop + int_plotHeight
 
-        cv2.rectangle(arr_canvas, (int_x1, int_y1), (int_x2, int_y2), tpl_barColor, -1)
-        cv2.rectangle(arr_canvas, (int_x1, int_y1), (int_x2, int_y2), (50, 50, 50), 1)
+        cv2.rectangle(arr_canvas, (int_x1, int_y1),
+                      (int_x2, int_y2), tpl_barColor, -1)
+        cv2.rectangle(arr_canvas, (int_x1, int_y1),
+                      (int_x2, int_y2), (50, 50, 50), 1)
 
         str_countLabel = str(int_count)
         cv2.putText(
@@ -451,7 +473,8 @@ def save_particle_distribution_histogram(
             cv2.LINE_AA,
         )
 
-        float_binCenter = float((arr_binEdges[int_binIdx] + arr_binEdges[int_binIdx + 1]) / 2.0)
+        float_binCenter = float(
+            (arr_binEdges[int_binIdx] + arr_binEdges[int_binIdx + 1]) / 2.0)
         str_xLabel = f"{float_binCenter:.1f}"
         cv2.putText(
             arr_canvas,
@@ -466,7 +489,8 @@ def save_particle_distribution_histogram(
 
     for int_tick in range(5):
         float_ratio = int_tick / 4.0
-        int_tickY = int_marginTop + int(round((1.0 - float_ratio) * int_plotHeight))
+        int_tickY = int_marginTop + \
+            int(round((1.0 - float_ratio) * int_plotHeight))
         int_tickValue = int(round(float_ratio * int_maxCount))
         cv2.line(
             arr_canvas,
@@ -694,18 +718,21 @@ class Sam2AspectRatioService:
 
         for int_tileIdx, (int_tx1, int_ty1, int_tx2, int_ty2) in enumerate(list_tiles):
             arr_tileBgr = arr_inputBgr[int_ty1:int_ty2, int_tx1:int_tx2].copy()
-            list_promptBatches: tp.List[tp.Optional[tp.Sequence[tp.Tuple[int, int]]]] = [None]
+            list_promptBatches: tp.List[tp.Optional[tp.Sequence[tp.Tuple[int, int]]]] = [
+                None]
             list_points: tp.List[tp.Tuple[int, int]] = []
 
             if self.obj_config.bool_usePointPrompts:
-                arr_tileGray = arr_inputGray[int_ty1:int_ty2, int_tx1:int_tx2].copy()
+                arr_tileGray = arr_inputGray[int_ty1:int_ty2,
+                                             int_tx1:int_tx2].copy()
                 list_points = sample_interest_points(
                     arr_tileGray=arr_tileGray,
                     int_maxPoints=self.obj_config.int_pointsPerTile,
                     int_minDistance=self.obj_config.int_pointMinDistance,
                     float_qualityLevel=self.obj_config.float_pointQualityLevel,
                 )
-                list_promptBatches = list(iter_chunks(list_points, self.obj_config.int_pointBatchSize))
+                list_promptBatches = list(iter_chunks(
+                    list_points, self.obj_config.int_pointBatchSize))
 
                 for int_px, int_py in list_points:
                     int_candidateCount += 1
@@ -733,7 +760,8 @@ class Sam2AspectRatioService:
                         continue
                     list_results = self.obj_model(  # type: ignore[misc]
                         source=arr_tileBgr,
-                        points=[[int_px, int_py] for int_px, int_py in list_pointChunk],
+                        points=[[int_px, int_py]
+                                for int_px, int_py in list_pointChunk],
                         labels=[1] * len(list_pointChunk),
                         **dict_predictCommon,
                     )
@@ -755,14 +783,17 @@ class Sam2AspectRatioService:
                     arr_tileScores = obj_result.boxes.conf.detach().cpu().numpy()
 
                 for int_maskIdx, arr_tm in enumerate(arr_tileMasks):
-                    arr_tileMask = (arr_tm > self.obj_config.float_maskBinarizeThreshold).astype(np.uint8)
+                    arr_tileMask = (
+                        arr_tm > self.obj_config.float_maskBinarizeThreshold).astype(np.uint8)
                     if int(arr_tileMask.sum()) < self.obj_config.int_minValidMaskArea:
                         continue
 
-                    arr_tileContour = self.extract_largest_contour(arr_tileMask)
+                    arr_tileContour = self.extract_largest_contour(
+                        arr_tileMask)
                     if arr_tileContour is None:
                         continue
-                    int_bx, int_by, int_bw, int_bh = cv2.boundingRect(arr_tileContour)
+                    int_bx, int_by, int_bw, int_bh = cv2.boundingRect(
+                        arr_tileContour)
                     int_tileHeight, int_tileWidth = arr_tileMask.shape[:2]
                     if self.is_bbox_near_edge(
                         int_x=int_bx,
@@ -772,7 +803,7 @@ class Sam2AspectRatioService:
                         int_width=int_tileWidth,
                         int_height=int_tileHeight,
                         int_margin=self.obj_config.int_tileEdgeMargin,
-                        ):
+                    ):
                         continue
 
                     tuple_globalBox = (
@@ -790,8 +821,10 @@ class Sam2AspectRatioService:
                         int_bboxDedupRejected += 1
                         continue
 
-                    arr_roiMask = np.zeros((int_roiHeight, int_roiWidth), dtype=np.uint8)
-                    arr_roiMask[int_ty1:int_ty2, int_tx1:int_tx2] = arr_tileMask
+                    arr_roiMask = np.zeros(
+                        (int_roiHeight, int_roiWidth), dtype=np.uint8)
+                    arr_roiMask[int_ty1:int_ty2,
+                                int_tx1:int_tx2] = arr_tileMask
 
                     bool_isDup = False
                     for arr_prevMask in list_keptMasks:
@@ -805,7 +838,8 @@ class Sam2AspectRatioService:
                     list_keptMasks.append(arr_roiMask)
                     list_keptBboxes.append(tuple_globalBox)
                     if arr_tileScores is not None and int_maskIdx < len(arr_tileScores):
-                        list_keptScores.append(float(arr_tileScores[int_maskIdx]))
+                        list_keptScores.append(
+                            float(arr_tileScores[int_maskIdx]))
                     else:
                         list_keptScores.append(None)
 
@@ -988,10 +1022,14 @@ class Sam2AspectRatioService:
             int_bboxY=int(int_y),
             int_bboxWidth=int(int_w),
             int_bboxHeight=int(int_h),
+            float_bboxWidthUm=convert_pixels_to_micrometers(float(int_w)),
+            float_bboxHeightUm=convert_pixels_to_micrometers(float(int_h)),
             float_centroidX=float_cx,
             float_centroidY=float_cy,
             int_longestHorizontal=int_horizontal,
             int_longestVertical=int_vertical,
+            float_longestHorizontalUm=convert_pixels_to_micrometers(float(int_horizontal)),
+            float_longestVerticalUm=convert_pixels_to_micrometers(float(int_vertical)),
             float_aspectRatioWH=float_aspectRatio,
         )
 
@@ -1075,6 +1113,9 @@ class Sam2AspectRatioService:
             "model_weights_path": str(self.obj_config.path_modelWeights),
             "model_weights_resolved_name": self.resolve_model_weights_path().name,
             "model_name": self.dict_modelConfig.get("model", self.obj_config.path_modelWeights.stem),
+            "scale_pixels": float(CONST_SCALE_PIXELS),
+            "scale_micrometers": float(CONST_SCALE_MICROMETERS),
+            "micrometers_per_pixel": float(CONST_MICROMETER_PER_PIXEL),
             "bbox_edge_margin": int(self.obj_config.int_bboxEdgeMargin),
             "tile_edge_margin": int(self.obj_config.int_tileEdgeMargin),
             "tile_size": int(self.obj_config.int_tileSize),
@@ -1211,7 +1252,8 @@ class Sam2AspectRatioService:
         """전체 파이프라인 실행."""
         arr_inputBgr = self.load_image_bgr()
         arr_inputRoiBgr, dict_roi = self.extract_inference_roi(arr_inputBgr)
-        arr_masks, arr_scores, dict_debug = self.predict_tiled_point_prompts(arr_inputRoiBgr)
+        arr_masks, arr_scores, dict_debug = self.predict_tiled_point_prompts(
+            arr_inputRoiBgr)
 
         list_objects: tp.List[ObjectMeasurement] = []
         list_validMasks: tp.List[np.ndarray] = []
@@ -1235,9 +1277,12 @@ class Sam2AspectRatioService:
         dict_summary = self.build_summary(list_objects)
         dict_summary["roi"] = dict_roi
         dict_summary["num_tiles"] = dict_debug.get("num_tiles")
-        dict_summary["num_candidate_points"] = dict_debug.get("num_candidate_points")
-        dict_summary["num_accepted_masks"] = dict_debug.get("num_accepted_masks")
-        dict_summary["num_bbox_dedup_rejected"] = dict_debug.get("num_bbox_dedup_rejected")
+        dict_summary["num_candidate_points"] = dict_debug.get(
+            "num_candidate_points")
+        dict_summary["num_accepted_masks"] = dict_debug.get(
+            "num_accepted_masks")
+        dict_summary["num_bbox_dedup_rejected"] = dict_debug.get(
+            "num_bbox_dedup_rejected")
         self.save_outputs(
             arr_inputBgr,
             arr_inputRoiBgr,
@@ -1263,7 +1308,8 @@ def collect_input_groups(path_input: Path) -> tp.List[tp.Tuple[str, tp.List[Path
     if path_input.is_file():
         return [(path_input.stem, [path_input])]
 
-    list_groupDirs = sorted([path_item for path_item in path_input.iterdir() if path_item.is_dir()])
+    list_groupDirs = sorted(
+        [path_item for path_item in path_input.iterdir() if path_item.is_dir()])
     list_groupedImages: tp.List[tp.Tuple[str, tp.List[Path]]] = []
 
     for path_groupDir in list_groupDirs:
@@ -1460,7 +1506,8 @@ def run_sam2_aspect_ratio(
             f"[single] processing image: {list_imagePaths[0].name}",
             flush=True,
         )
-        obj_service = Sam2AspectRatioService(create_config(str_groupId, list_imagePaths[0]))
+        obj_service = Sam2AspectRatioService(
+            create_config(str_groupId, list_imagePaths[0]))
         obj_result = obj_service.process()
         print(
             f"[single] done: {list_imagePaths[0].name}",
@@ -1495,9 +1542,11 @@ def run_sam2_aspect_ratio(
                 f"  [image {int_imageIndex}/{int_numImages}] {path_image.name}",
                 flush=True,
             )
-            obj_service = Sam2AspectRatioService(create_config(str_groupId, path_image))
+            obj_service = Sam2AspectRatioService(
+                create_config(str_groupId, path_image))
             obj_service.obj_model = obj_sharedService.obj_model
-            obj_service.dict_modelConfig = dict(obj_sharedService.dict_modelConfig)
+            obj_service.dict_modelConfig = dict(
+                obj_sharedService.dict_modelConfig)
             obj_result = obj_service.process()
 
             dict_fileSummary = dict(obj_result.dict_summary)
