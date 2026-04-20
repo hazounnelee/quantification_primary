@@ -48,7 +48,6 @@ CONST_PARTICLE_AREA_THRESHOLD: float = 1500.0
 # 길이 단위 환산 배율: 276 pixel = 50 um
 CONST_SCALE_PIXELS: float = 276.0
 CONST_SCALE_MICROMETERS: float = 50.0
-CONST_MICROMETER_PER_PIXEL: float = CONST_SCALE_MICROMETERS / CONST_SCALE_PIXELS
 CONST_SMALL_PARTICLE_SCALE_PIXELS: float = 184.0
 CONST_SMALL_PARTICLE_SCALE_MICROMETERS: float = 10.0
 CONST_DEFAULT_SMALL_PARTICLE: bool = False
@@ -88,7 +87,6 @@ CONST_DEFAULT_POINT_QUALITY_LEVEL: float = 0.03
 CONST_DEFAULT_POINT_BATCH_SIZE: int = 32
 CONST_DEFAULT_DEDUP_IOU: float = 0.60
 CONST_DEFAULT_BBOX_DEDUP_IOU: float = 0.85
-CONST_DEFAULT_MULTIMASK_OUTPUT: bool = True
 CONST_DEFAULT_USE_POINT_PROMPTS: bool = True
 
 CONST_SUPPORTED_IMAGE_SUFFIXES: tp.Tuple[str, ...] = (
@@ -131,7 +129,6 @@ class Sam2AspectRatioConfig:
     int_pointBatchSize: int = CONST_DEFAULT_POINT_BATCH_SIZE
     float_dedupIou: float = CONST_DEFAULT_DEDUP_IOU
     float_bboxDedupIou: float = CONST_DEFAULT_BBOX_DEDUP_IOU
-    bool_multimaskOutput: bool = CONST_DEFAULT_MULTIMASK_OUTPUT
     bool_usePointPrompts: bool = CONST_DEFAULT_USE_POINT_PROMPTS
     bool_smallParticle: bool = CONST_DEFAULT_SMALL_PARTICLE
     float_scalePixels: float = CONST_SCALE_PIXELS
@@ -173,7 +170,16 @@ class Sam2AspectRatioResult:
 
 
 def normalize_image_to_uint8(arr_img: np.ndarray) -> np.ndarray:
-    """이미지를 0~255 uint8 범위로 정규화."""
+    """이미지 배열을 0~255 범위의 `uint8` 배열로 정규화한다.
+
+    Args:
+        arr_img: 임의 dtype을 가질 수 있는 입력 이미지 배열. 일반적으로
+            grayscale 또는 single-channel 계산 결과를 받는다.
+
+    Returns:
+        입력 배열과 동일한 shape의 `np.uint8` 배열. 입력값의 최소/최대값을 기준으로
+        선형 정규화되며, 동적 범위가 0에 가까우면 0으로 채워진 배열을 반환한다.
+    """
     arr_f32 = arr_img.astype(np.float32)
     float_mn = float(arr_f32.min())
     float_mx = float(arr_f32.max())
@@ -188,7 +194,18 @@ def convert_pixels_to_micrometers(
     float_scalePixels: float = CONST_SCALE_PIXELS,
     float_scaleMicrometers: float = CONST_SCALE_MICROMETERS,
 ) -> float:
-    """픽셀 길이를 마이크로미터 길이로 환산."""
+    """픽셀 길이를 마이크로미터 길이로 환산한다.
+
+    Args:
+        float_pixels: 변환할 길이 값. 단위는 pixel이다.
+        float_scalePixels: 기준 스케일의 pixel 길이. 예를 들어 `276 px = 50 um`
+            조건이면 `276.0`이 들어간다.
+        float_scaleMicrometers: 기준 스케일의 micrometer 길이.
+
+    Returns:
+        `float_pixels`에 대응하는 마이크로미터 길이. `float_scalePixels`가 0 이하이면
+        0.0을 반환한다.
+    """
     if float_scalePixels <= 0.0:
         return 0.0
     return float(float_pixels * (float_scaleMicrometers / float_scalePixels))
@@ -202,7 +219,20 @@ def create_processing_tiles(
     int_tileSize: int,
     int_stride: int,
 ) -> tp.List[tp.Tuple[int, int, int, int]]:
-    """ROI 내부를 타일로 분할."""
+    """주어진 ROI 사각형을 겹치는 타일 목록으로 분할한다.
+
+    Args:
+        int_x1: ROI 시작 x 좌표.
+        int_y1: ROI 시작 y 좌표.
+        int_x2: ROI 끝 x 좌표. Python slicing과 동일하게 exclusive 성격으로 사용된다.
+        int_y2: ROI 끝 y 좌표. Python slicing과 동일하게 exclusive 성격으로 사용된다.
+        int_tileSize: 정사각형 타일의 한 변 길이(pixel).
+        int_stride: 인접 타일 시작점 간 이동 간격(pixel).
+
+    Returns:
+        각 타일의 `(x1, y1, x2, y2)` 좌표 리스트. ROI가 타일보다 작으면 ROI 전체를
+        하나의 타일로 반환한다.
+    """
     list_tiles = list()
     if int_x2 - int_x1 <= int_tileSize and int_y2 - int_y1 <= int_tileSize:
         list_tiles.append((int_x1, int_y1, int_x2, int_y2))
@@ -234,7 +264,15 @@ def create_processing_tiles(
 
 
 def enhance_image_texture(arr_tileGray: np.ndarray) -> np.ndarray:
-    """blob/edge 기반 후보점 추출을 위해 texture를 강화."""
+    """후보점 추출을 위해 grayscale 타일의 texture와 edge를 강화한다.
+
+    Args:
+        arr_tileGray: 2차원 grayscale 타일 이미지. dtype은 일반적으로 `uint8`이다.
+
+    Returns:
+        CLAHE, blur, morphological gradient, blackhat, Laplacian 결과를 결합한
+        `uint8` grayscale 이미지. 이후 후보점 탐색의 입력으로 사용된다.
+    """
     obj_clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
     arr_img = obj_clahe.apply(arr_tileGray)
     arr_blur = cv2.GaussianBlur(arr_img, (3, 3), 0)
@@ -259,7 +297,19 @@ def sample_interest_points(
     int_minDistance: int,
     float_qualityLevel: float,
 ) -> tp.List[tp.Tuple[int, int]]:
-    """타일 내에서 blob/edge 후보 위치를 샘플링하고 score 기준으로 상위 point를 선택."""
+    """타일 내부의 SAM2 point prompt 후보 좌표를 추출한다.
+
+    Args:
+        arr_tileGray: 후보점을 찾을 grayscale 타일 이미지.
+        int_maxPoints: 최종적으로 유지할 최대 후보점 개수.
+        int_minDistance: 후보점 사이의 최소 거리(pixel). 너무 가까운 점은 제거된다.
+        float_qualityLevel: `cv2.goodFeaturesToTrack`에 전달되는 quality level.
+
+    Returns:
+        `(x, y)` 형식의 정수 좌표 리스트. texture 기반 코너 탐지 결과를 우선 사용하고,
+        후보가 부족하면 contour centroid를 fallback으로 보강한 뒤 점수와 거리 제약으로
+        상위 점만 남긴다.
+    """
     arr_enhanced = enhance_image_texture(arr_tileGray)
     arr_corners = cv2.goodFeaturesToTrack(
         arr_enhanced,
@@ -321,7 +371,15 @@ def sample_interest_points(
 
 
 def calculate_binary_iou(arr_maskA: np.ndarray, arr_maskB: np.ndarray) -> float:
-    """두 이진 마스크 간 IoU 계산."""
+    """두 이진 마스크의 IoU(Intersection over Union)를 계산한다.
+
+    Args:
+        arr_maskA: 첫 번째 binary mask. 0은 배경, 0보다 큰 값은 foreground로 간주한다.
+        arr_maskB: 두 번째 binary mask. shape은 `arr_maskA`와 같아야 한다.
+
+    Returns:
+        두 마스크의 IoU 값. union이 0이면 0.0을 반환한다.
+    """
     int_inter = np.logical_and(arr_maskA > 0, arr_maskB > 0).sum()
     int_union = np.logical_or(arr_maskA > 0, arr_maskB > 0).sum()
     if int_union == 0:
@@ -333,7 +391,15 @@ def calculate_box_iou(
     tuple_boxA: tp.Tuple[int, int, int, int],
     tuple_boxB: tp.Tuple[int, int, int, int],
 ) -> float:
-    """두 bbox(x, y, w, h) 간 IoU 계산."""
+    """두 bounding box의 IoU를 계산한다.
+
+    Args:
+        tuple_boxA: `(x, y, w, h)` 형식의 첫 번째 bbox.
+        tuple_boxB: `(x, y, w, h)` 형식의 두 번째 bbox.
+
+    Returns:
+        두 bbox의 IoU 값. union 면적이 0 이하이면 0.0을 반환한다.
+    """
     int_ax1, int_ay1, int_aw, int_ah = tuple_boxA
     int_bx1, int_by1, int_bw, int_bh = tuple_boxB
     int_ax2 = int_ax1 + int_aw
@@ -359,14 +425,31 @@ def iter_chunks(
     list_items: tp.Sequence[tp.Tuple[int, int]],
     int_chunkSize: int,
 ) -> tp.Iterable[tp.Sequence[tp.Tuple[int, int]]]:
-    """리스트를 고정 크기 chunk로 분할."""
+    """시퀀스를 고정 크기 chunk 단위로 순회한다.
+
+    Args:
+        list_items: `(x, y)` 좌표 시퀀스.
+        int_chunkSize: chunk 하나에 포함할 최대 원소 수.
+
+    Yields:
+        원본 시퀀스의 연속 구간을 담는 부분 시퀀스. `int_chunkSize`가 1 이하이면
+        1로 보정된다.
+    """
     int_chunkSize = max(1, int_chunkSize)
     for int_idx in range(0, len(list_items), int_chunkSize):
         yield list_items[int_idx:int_idx + int_chunkSize]
 
 
 def load_particle_mean_sizes_from_csv(path_particlesCsv: Path) -> np.ndarray:
-    """particles.csv에서 각 particle의 평균 길이 (um) 를 읽어온다."""
+    """`particles.csv`에서 particle 평균 크기(um)를 읽어온다.
+
+    Args:
+        path_particlesCsv: `particles.csv` 파일 경로. UTF-8 BOM(`utf-8-sig`)로 읽는다.
+
+    Returns:
+        각 row의 `(float_longestHorizontalUm + float_longestVerticalUm) / 2` 값을 담은
+        `np.float32` 1차원 배열. 파일이 없거나 유효한 row가 없으면 빈 배열을 반환한다.
+    """
     if not path_particlesCsv.exists():
         return np.array([], dtype=np.float32)
 
@@ -387,7 +470,15 @@ def load_particle_mean_sizes_from_csv(path_particlesCsv: Path) -> np.ndarray:
 
 
 def get_lot_number_from_input_path(path_inputImage: Path) -> str:
-    """입력 이미지 절대 경로에서 바로 위 directory 이름을 lot 번호로 추출한다."""
+    """입력 이미지 경로에서 lot 번호를 추출한다.
+
+    Args:
+        path_inputImage: 원본 입력 이미지 경로.
+
+    Returns:
+        절대경로 기준 이미지 파일의 바로 위 directory 이름. 비어 있으면
+        `"UnknownLot"`을 반환한다.
+    """
     try:
         path_resolved = path_inputImage.resolve()
     except OSError:
@@ -401,15 +492,32 @@ def save_particle_distribution_histogram(
     path_outputImage: Path,
     path_inputImage: Path,
 ) -> None:
-    """particles.csv 기준 particle 평균 길이(um) 분포 histogram 이미지를 저장한다."""
+    """particle 크기 분포 histogram을 `png` 파일로 저장한다.
+
+    Args:
+        path_particlesCsv: particle 측정 결과 CSV 경로. 평균 크기 계산의 데이터 소스다.
+        path_outputImage: 저장할 histogram 이미지 경로. 일반적으로 `particle_dist.png`.
+        path_inputImage: lot 번호 추출에 사용할 원본 이미지 경로.
+
+    Returns:
+        없음. `matplotlib`의 headless backend(`Agg`)를 사용해 histogram 이미지를
+        디스크에 저장한다.
+
+    Notes:
+        - x축 값은 micrometer 단위 particle 평균 크기다.
+        - 제목은 입력 이미지의 부모 directory 이름(lot 번호)이다.
+        - 평균 크기 위치에는 빨간 vertical line과 빨간 텍스트를 함께 표시한다.
+        - particle 데이터가 없으면 빈 축에 안내 문구만 그린다.
+    """
     arr_meanSizes = load_particle_mean_sizes_from_csv(path_particlesCsv)
     str_lotNumber = get_lot_number_from_input_path(path_inputImage)
     obj_fig, obj_ax = plt.subplots(figsize=(9.6, 6.4), dpi=100)
 
     try:
-        obj_ax.set_title(str_lotNumber, fontsize=16)
-        obj_ax.set_ylabel("Count")
-        obj_ax.set_xlabel("Mean of longest horizontal and vertical length (um)")
+        obj_ax.set_title(str_lotNumber, fontsize=28)
+        obj_ax.set_ylabel("Count", fontsize=20)
+        obj_ax.set_xlabel("Mean of longest horizontal and vertical length (um)", fontsize=20)
+        obj_ax.tick_params(axis="both", labelsize=20)
 
         if arr_meanSizes.size == 0:
             obj_ax.text(
@@ -449,7 +557,7 @@ def save_particle_distribution_histogram(
                 float_yMax * 0.96,
                 f"Mean: {float_meanValue:.2f} um",
                 color="red",
-                fontsize=11,
+                fontsize=24,
                 ha="left",
                 va="top",
             )
@@ -462,15 +570,31 @@ def save_particle_distribution_histogram(
 
 
 class Sam2AspectRatioService:
-    """SAM2 추론 및 후처리를 담당하는 서비스 클래스."""
+    """SAM2 추론, 후처리, 결과 저장을 담당하는 서비스 클래스.
+
+    Attributes:
+        obj_config: 전체 파이프라인 설정을 담는 `Sam2AspectRatioConfig`.
+        obj_model: 초기화 이후의 Ultralytics `SAM` 모델 인스턴스. 초기에는 `None`.
+        dict_modelConfig: YAML 또는 대체 파싱 결과를 담는 메타데이터 dict.
+    """
 
     def __init__(self, obj_config: Sam2AspectRatioConfig) -> None:
+        """서비스 객체를 생성한다.
+
+        Args:
+            obj_config: 경로, 추론 파라미터, 후처리 파라미터를 포함한 설정 객체.
+        """
         self.obj_config = obj_config
         self.obj_model: tp.Optional[SAM] = None
         self.dict_modelConfig: tp.Dict[str, tp.Any] = dict()
 
     def validate_inputs(self) -> None:
-        """입력 경로 유효성 검증."""
+        """필수 입력 경로들의 존재 여부를 검증한다.
+
+        Raises:
+            FileNotFoundError: 입력 이미지, 모델 설정 파일, 가중치 파일 중 하나라도
+                존재하지 않을 때 발생한다.
+        """
         list_requiredPaths = [
             self.obj_config.path_input,
             self.obj_config.path_modelConfig,
@@ -481,7 +605,15 @@ class Sam2AspectRatioService:
                 raise FileNotFoundError(f"필수 경로를 찾을 수 없습니다: {path_item}")
 
     def load_model_config(self) -> None:
-        """SAM2 YAML 설정을 로드하여 결과 메타데이터에 포함."""
+        """모델 설정 파일을 읽어 결과 메타데이터용 dict로 정리한다.
+
+        Returns:
+            없음. 파싱 결과는 `self.dict_modelConfig`에 저장된다.
+
+        Notes:
+            설정 파일이 정상 YAML dict이면 그대로 저장한다. YAML이 아니거나 HTML이
+            들어있으면 파싱 상태와 일부 preview만 메타데이터로 남긴다.
+        """
         str_rawText = self.obj_config.path_modelConfig.read_text(
             encoding="utf-8", errors="ignore")
 
@@ -510,6 +642,12 @@ class Sam2AspectRatioService:
 
         일부 체크포인트는 파일 내용은 정상이어도 파일명 규칙이 다르면 Ultralytics가
         지원 모델로 인식하지 못하므로, 필요한 경우 alias 파일을 생성한다.
+
+        Returns:
+            Ultralytics가 인식 가능한 파일명으로 정규화된 weight 파일 경로.
+
+        Raises:
+            FileNotFoundError: 현재 코드가 지원하지 않는 weight 파일명일 때 발생한다.
         """
         path_weights = self.obj_config.path_modelWeights
         set_supportedNames = {
@@ -564,14 +702,25 @@ class Sam2AspectRatioService:
         return path_alias
 
     def initialize_model(self) -> None:
-        """SAM2 모델 초기화."""
+        """입력 검증과 설정 로드를 거쳐 SAM2 모델을 초기화한다.
+
+        Returns:
+            없음. 초기화된 모델은 `self.obj_model`에 저장된다.
+        """
         self.validate_inputs()
         self.load_model_config()
         path_resolvedWeights = self.resolve_model_weights_path()
         self.obj_model = SAM(str(path_resolvedWeights))
 
     def load_image_bgr(self) -> np.ndarray:
-        """입력 이미지를 BGR 형식으로 로드."""
+        """입력 이미지를 OpenCV BGR 형식으로 로드한다.
+
+        Returns:
+            shape `(H, W, 3)`의 BGR `np.ndarray`.
+
+        Raises:
+            FileNotFoundError: 이미지를 읽을 수 없을 때 발생한다.
+        """
         arr_image = cv2.imread(
             str(self.obj_config.path_input), cv2.IMREAD_COLOR)
         if arr_image is None:
@@ -583,7 +732,21 @@ class Sam2AspectRatioService:
         self,
         arr_imageBgr: np.ndarray,
     ) -> tp.Tuple[np.ndarray, tp.Dict[str, int]]:
-        """전체 이미지에서 실제 추론에 사용할 ROI crop 추출."""
+        """전체 이미지에서 실제 추론 대상 ROI를 crop한다.
+
+        Args:
+            arr_imageBgr: 원본 BGR 이미지 배열.
+
+        Returns:
+            `(arr_roiBgr, dict_roi)` 튜플.
+            - `arr_roiBgr`: ROI 영역만 잘라낸 BGR 이미지.
+            - `dict_roi`: `x_min`, `y_min`, `x_max`, `y_max`, `width`, `height`
+              키를 가지는 ROI 메타데이터 dict.
+
+        Raises:
+            ValueError: ROI 설정이 이미지 범위와 교차하지 않아 유효한 crop을 만들 수
+                없을 때 발생한다.
+        """
         int_h, int_w = arr_imageBgr.shape[:2]
 
         int_x0 = max(0, min(self.obj_config.int_roiXMin, int_w))
@@ -611,7 +774,23 @@ class Sam2AspectRatioService:
         self,
         arr_inputBgr: np.ndarray,
     ) -> tp.Tuple[np.ndarray, tp.Optional[np.ndarray], tp.Dict[str, tp.Any]]:
-        """타일 단위로 SAM2 추론 수행. 필요 시 후보점 기반 point prompt를 사용."""
+        """ROI 이미지를 타일 단위로 SAM2 추론한다.
+
+        Args:
+            arr_inputBgr: ROI crop 이후의 BGR 이미지. shape은 일반적으로 `(H, W, 3)`.
+
+        Returns:
+            `(arr_masks, arr_scores, dict_debug)` 튜플.
+            - `arr_masks`: ROI 좌표계 기준 binary mask 배열. shape은
+              `(N, H, W)`이며, mask가 없으면 빈 배열이다.
+            - `arr_scores`: 각 mask의 confidence score 배열. score가 없으면 `None`.
+            - `dict_debug`: tile 수, 후보점 수, 중복 제거 수, 각 tile/point 정보를 담는
+              디버그 dict.
+
+        Notes:
+            `bool_usePointPrompts=True`이면 OpenCV 후보점을 추출해 batch point prompt로
+            SAM2를 호출하고, `False`이면 tile 전체에 대해 자동 분할을 수행한다.
+        """
         if self.obj_model is None:
             self.initialize_model()
 
@@ -793,10 +972,17 @@ class Sam2AspectRatioService:
 
     def refine_mask_for_area(self, arr_mask: np.ndarray) -> np.ndarray:
         """
-        면적 계산 전 binary mask 후처리.
+        면적 계산 전 binary mask를 후처리한다.
 
-        area_threshold 자체뿐 아니라 이 함수의 threshold / morphology 설정도
-        최종 area 값에 직접 영향을 준다.
+        Args:
+            arr_mask: 입력 binary 또는 binary-like mask. 0 초과값을 foreground로 본다.
+
+        Returns:
+            morphology가 적용된 `uint8` binary mask.
+
+        Notes:
+            area threshold 자체뿐 아니라 이 함수의 morphology 설정도 최종 area 값에
+            직접 영향을 준다.
         """
         arr_maskUint8 = (arr_mask > 0).astype(np.uint8)
 
@@ -827,7 +1013,16 @@ class Sam2AspectRatioService:
 
     @staticmethod
     def get_longest_span(arr_mask: np.ndarray, bool_horizontal: bool) -> int:
-        """마스크 내부의 가장 긴 가로/세로 span 길이 계산."""
+        """마스크 내부의 가장 긴 가로/세로 span 길이를 계산한다.
+
+        Args:
+            arr_mask: 2차원 binary mask.
+            bool_horizontal: `True`이면 가로 방향 span, `False`이면 세로 방향 span을
+                계산한다.
+
+        Returns:
+            foreground 픽셀이 존재하는 한 줄에서의 최대 span 길이(pixel).
+        """
         arr_scan = arr_mask if bool_horizontal else arr_mask.T
         int_longest = 0
         for arr_line in arr_scan:
@@ -841,7 +1036,14 @@ class Sam2AspectRatioService:
 
     @staticmethod
     def extract_largest_contour(arr_mask: np.ndarray) -> tp.Optional[np.ndarray]:
-        """외곽 contour 중 가장 큰 contour 반환."""
+        """외곽 contour 중 면적이 가장 큰 contour를 반환한다.
+
+        Args:
+            arr_mask: contour를 찾을 binary mask.
+
+        Returns:
+            가장 큰 contour의 OpenCV contour 배열. contour가 없으면 `None`.
+        """
         list_contours, _ = cv2.findContours(
             arr_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not list_contours:
@@ -858,7 +1060,20 @@ class Sam2AspectRatioService:
         int_height: int,
         int_margin: int,
     ) -> bool:
-        """bbox가 주어진 영역 경계와 margin 이내면 제외 대상으로 판정."""
+        """bbox가 영역 경계에 너무 가까운지 판정한다.
+
+        Args:
+            int_x: bbox 좌상단 x.
+            int_y: bbox 좌상단 y.
+            int_w: bbox width.
+            int_h: bbox height.
+            int_width: bbox가 놓인 기준 영역의 전체 width.
+            int_height: bbox가 놓인 기준 영역의 전체 height.
+            int_margin: 경계와의 최소 허용 거리.
+
+        Returns:
+            bbox의 어느 한 변이라도 기준 영역 경계에서 `int_margin` 이내면 `True`.
+        """
         int_margin = max(0, int_margin)
         int_right = int_x + int_w
         int_bottom = int_y + int_h
@@ -878,7 +1093,19 @@ class Sam2AspectRatioService:
         int_roiWidth: int,
         int_roiHeight: int,
     ) -> bool:
-        """bbox가 ROI 경계와 margin 이내면 제외 대상으로 판정."""
+        """bbox가 ROI 경계에 너무 가까운지 판정한다.
+
+        Args:
+            int_x: ROI 좌표계 기준 bbox x.
+            int_y: ROI 좌표계 기준 bbox y.
+            int_w: bbox width.
+            int_h: bbox height.
+            int_roiWidth: ROI 전체 width.
+            int_roiHeight: ROI 전체 height.
+
+        Returns:
+            ROI 경계와의 거리가 `obj_config.int_bboxEdgeMargin` 이내이면 `True`.
+        """
         return self.is_bbox_near_edge(
             int_x=int_x,
             int_y=int_y,
@@ -890,7 +1117,15 @@ class Sam2AspectRatioService:
         )
 
     def convert_pixels_to_micrometers(self, float_pixels: float) -> float:
-        """현재 config의 scale 기준으로 픽셀 길이를 um로 환산."""
+        """현재 config의 scale 기준으로 픽셀 길이를 um로 환산한다.
+
+        Args:
+            float_pixels: pixel 단위 길이 값.
+
+        Returns:
+            현재 설정된 scale(`float_scalePixels`, `float_scaleMicrometers`) 기준의
+            micrometer 길이.
+        """
         return convert_pixels_to_micrometers(
             float_pixels=float_pixels,
             float_scalePixels=self.obj_config.float_scalePixels,
@@ -903,7 +1138,17 @@ class Sam2AspectRatioService:
         int_index: int,
         float_confidence: tp.Optional[float],
     ) -> tp.Optional[ObjectMeasurement]:
-        """개별 마스크의 면적/위치/종횡비 측정."""
+        """단일 mask의 측정값을 계산해 `ObjectMeasurement`로 변환한다.
+
+        Args:
+            arr_mask: ROI 좌표계 기준 binary mask.
+            int_index: 현재 mask의 인덱스. 결과 식별용으로 그대로 저장된다.
+            float_confidence: SAM2가 제공한 confidence score. 없으면 `None`.
+
+        Returns:
+            유효한 객체이면 `ObjectMeasurement`, 너무 작거나 contour가 없거나 ROI 경계에
+            너무 가까우면 `None`.
+        """
         arr_refinedMask = self.refine_mask_for_area(arr_mask)
         int_maskArea = int(arr_refinedMask.sum())
         if int_maskArea < self.obj_config.int_minValidMaskArea:
@@ -974,7 +1219,16 @@ class Sam2AspectRatioService:
         list_objects: tp.List[ObjectMeasurement],
         list_masks: tp.List[np.ndarray],
     ) -> np.ndarray:
-        """마스크와 라벨을 시각화한 오버레이 생성."""
+        """객체 마스크와 라벨을 원본 ROI 이미지 위에 시각화한다.
+
+        Args:
+            arr_imageBgr: ROI 이미지.
+            list_objects: 시각화할 객체 측정 결과 리스트.
+            list_masks: 각 객체에 대응하는 ROI 좌표계 binary mask 리스트.
+
+        Returns:
+            mask overlay, contour, bbox, 텍스트 라벨이 그려진 BGR 이미지.
+        """
         arr_overlay = arr_imageBgr.copy()
 
         for obj_measurement, arr_mask in zip(list_objects, list_masks):
@@ -1029,7 +1283,15 @@ class Sam2AspectRatioService:
         return arr_overlay
 
     def build_summary(self, list_objects: tp.List[ObjectMeasurement]) -> tp.Dict[str, tp.Any]:
-        """요약 통계 생성."""
+        """단일 이미지 처리 결과에 대한 요약 통계를 생성한다.
+
+        Args:
+            list_objects: 유효성 검사를 통과한 객체 측정 결과 리스트.
+
+        Returns:
+            JSON 저장에 바로 사용할 수 있는 요약 dict. 설정값, 집계 개수, 비율,
+            종횡비 통계가 포함된다.
+        """
         list_particles = [
             obj_item for obj_item in list_objects if obj_item.str_category == "particle"]
         list_fragments = [
@@ -1070,7 +1332,6 @@ class Sam2AspectRatioService:
             "point_batch_size": int(self.obj_config.int_pointBatchSize),
             "dedup_iou": float(self.obj_config.float_dedupIou),
             "bbox_dedup_iou": float(self.obj_config.float_bboxDedupIou),
-            "multimask_output_requested": bool(self.obj_config.bool_multimaskOutput),
             "use_point_prompts": bool(self.obj_config.bool_usePointPrompts),
             "particle_area_threshold": float(self.obj_config.float_particleAreaThreshold),
             "mask_binarize_threshold": float(self.obj_config.float_maskBinarizeThreshold),
@@ -1118,7 +1379,21 @@ class Sam2AspectRatioService:
         dict_roi: tp.Dict[str, int],
         dict_debug: tp.Dict[str, tp.Any],
     ) -> None:
-        """이미지/CSV/JSON 결과 저장."""
+        """이미지, CSV, JSON, histogram 등 최종 산출물을 저장한다.
+
+        Args:
+            arr_inputBgr: 원본 입력 이미지.
+            arr_inputRoiBgr: 추론에 사용된 ROI 이미지.
+            arr_overlayRoi: ROI 위에 객체 시각화를 그린 이미지.
+            list_objects: 저장할 객체 측정 결과 리스트.
+            list_masks: 각 객체에 대응하는 ROI 좌표계 binary mask 리스트.
+            dict_summary: summary.json에 저장할 요약 dict.
+            dict_roi: ROI 좌표 및 크기 정보 dict.
+            dict_debug: 디버그용 tile/point/mask 정보 dict.
+
+        Returns:
+            없음. output directory 아래에 png/csv/json 파일들을 기록한다.
+        """
         self.obj_config.path_outputDir.mkdir(parents=True, exist_ok=True)
 
         arr_overlayFull = arr_inputBgr.copy()
@@ -1198,7 +1473,11 @@ class Sam2AspectRatioService:
                         arr_mask.astype(np.uint8) * 255)
 
     def process(self) -> Sam2AspectRatioResult:
-        """전체 파이프라인 실행."""
+        """단일 이미지에 대한 전체 파이프라인을 실행한다.
+
+        Returns:
+            측정 결과 리스트와 summary dict를 포함하는 `Sam2AspectRatioResult`.
+        """
         arr_inputBgr = self.load_image_bgr()
         arr_inputRoiBgr, dict_roi = self.extract_inference_roi(arr_inputBgr)
         arr_masks, arr_scores, dict_debug = self.predict_tiled_point_prompts(
@@ -1250,7 +1529,19 @@ class Sam2AspectRatioService:
 
 
 def collect_input_groups(path_input: Path) -> tp.List[tp.Tuple[str, tp.List[Path]]]:
-    """입력 경로에서 처리 대상 이미지 그룹을 수집."""
+    """입력 경로에서 처리할 이미지 그룹 목록을 구성한다.
+
+    Args:
+        path_input: 단일 이미지 파일 또는 root directory 경로.
+
+    Returns:
+        `(group_id, image_paths)` 튜플의 리스트.
+        - 단일 파일 입력이면 파일 stem을 group id로 하는 1개 그룹을 반환한다.
+        - 디렉터리 입력이면 `IMG_ID` 폴더 단위 또는 flat 이미지 목록을 그룹으로 반환한다.
+
+    Raises:
+        FileNotFoundError: 입력 경로가 없거나, 처리할 이미지 파일을 찾지 못할 때 발생한다.
+    """
     if not path_input.exists():
         raise FileNotFoundError(f"입력 경로를 찾을 수 없습니다: {path_input}")
 
@@ -1296,7 +1587,18 @@ def build_image_output_dir(
     path_image: Path,
     bool_isBatch: bool,
 ) -> Path:
-    """단일 이미지 / 배치 입력에 맞는 출력 폴더 경로 구성."""
+    """입력 형태에 맞는 이미지별 출력 폴더 경로를 구성한다.
+
+    Args:
+        path_outputRoot: 최상위 output directory.
+        str_groupId: 현재 이미지가 속한 group 또는 IMG_ID 이름.
+        path_image: 현재 처리 중인 이미지 경로.
+        bool_isBatch: 배치 입력 여부.
+
+    Returns:
+        단일 입력이면 `path_outputRoot`, 배치 입력이면
+        `path_outputRoot / str_groupId / image_name_ext` 경로.
+    """
     if not bool_isBatch:
         return path_outputRoot
     str_dirName = f"{path_image.stem}{path_image.suffix.lower().replace('.', '_')}"
@@ -1306,7 +1608,14 @@ def build_image_output_dir(
 def calculate_mean_from_optional_values(
     list_values: tp.Iterable[tp.Optional[float]],
 ) -> tp.Optional[float]:
-    """None 을 제외한 평균 계산."""
+    """`None`을 제외한 평균을 계산한다.
+
+    Args:
+        list_values: `float` 또는 `None`으로 이루어진 iterable.
+
+    Returns:
+        유효한 값이 하나라도 있으면 평균값, 없으면 `None`.
+    """
     list_validValues = [float(x) for x in list_values if x is not None]
     if not list_validValues:
         return None
@@ -1314,7 +1623,15 @@ def calculate_mean_from_optional_values(
 
 
 def calculate_percentage(int_part: int, int_total: int) -> float:
-    """part / total 비율을 퍼센트로 계산."""
+    """부분/전체 비율을 퍼센트로 환산한다.
+
+    Args:
+        int_part: 분자에 해당하는 개수.
+        int_total: 분모에 해당하는 전체 개수.
+
+    Returns:
+        `int_part / int_total * 100.0`. 전체 개수가 0 이하이면 0.0.
+    """
     if int_total <= 0:
         return 0.0
     return float((float(int_part) / float(int_total)) * 100.0)
@@ -1325,7 +1642,17 @@ def build_img_id_summary(
     path_outputRoot: Path,
     list_fileSummaries: tp.List[tp.Dict[str, tp.Any]],
 ) -> tp.Dict[str, tp.Any]:
-    """IMG_ID 폴더 단위 요약 생성."""
+    """동일 IMG_ID 그룹의 이미지 요약들을 집계한다.
+
+    Args:
+        str_imgId: 그룹 이름 또는 IMG_ID.
+        path_outputRoot: 최상위 output directory.
+        list_fileSummaries: 같은 IMG_ID에 속한 이미지별 summary dict 리스트.
+
+    Returns:
+        IMG_ID 단위 집계 summary dict. 이미지 수, 객체 수, particle/fragment 수,
+        비율, 평균 fragment count, 평균 aspect ratio를 포함한다.
+    """
     int_totalObjects = int(sum(dict_item.get("num_total_objects", 0) for dict_item in list_fileSummaries))
     int_particleCount = int(sum(dict_item.get("num_particles", 0) for dict_item in list_fileSummaries))
     int_fragmentCount = int(sum(dict_item.get("num_fragments", 0) for dict_item in list_fileSummaries))
@@ -1359,7 +1686,17 @@ def build_batch_summary(
     path_outputDir: Path,
     list_groupSummaries: tp.List[tp.Dict[str, tp.Any]],
 ) -> tp.Dict[str, tp.Any]:
-    """디렉터리 입력용 통합 요약 생성."""
+    """배치 처리 전체에 대한 최종 통합 summary를 생성한다.
+
+    Args:
+        path_input: 사용자가 넘긴 원본 입력 경로.
+        path_outputDir: 배치 결과가 저장된 최상위 output directory.
+        list_groupSummaries: IMG_ID 단위 summary dict 리스트.
+
+    Returns:
+        전체 배치 요약 dict. 총 이미지 수, 총 객체 수, particle/fragment 수,
+        fine particle 비율, IMG_ID 평균 통계를 포함한다.
+    """
     int_totalObjects = int(sum(dict_item.get("num_total_objects", 0) for dict_item in list_groupSummaries))
     int_particleCount = int(sum(dict_item.get("num_particles", 0) for dict_item in list_groupSummaries))
     int_fragmentCount = int(sum(dict_item.get("num_fragments", 0) for dict_item in list_groupSummaries))
@@ -1392,7 +1729,11 @@ def build_batch_summary(
 
 
 def build_default_output_dir_name() -> str:
-    """기본 output_dir 이름에 타임스탬프를 붙여 이전 결과 덮어쓰기를 방지."""
+    """기본 output directory 이름을 생성한다.
+
+    Returns:
+        `out_sam2_aspect_ratio_YYYYMMDD_HHMMSS` 형식의 문자열.
+    """
     str_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return f"out_sam2_aspect_ratio_{str_timestamp}"
 
@@ -1423,14 +1764,49 @@ def run_sam2_aspect_ratio(
     int_pointBatchSize: int = CONST_DEFAULT_POINT_BATCH_SIZE,
     float_dedupIou: float = CONST_DEFAULT_DEDUP_IOU,
     float_bboxDedupIou: float = CONST_DEFAULT_BBOX_DEDUP_IOU,
-    bool_multimaskOutput: bool = CONST_DEFAULT_MULTIMASK_OUTPUT,
     bool_usePointPrompts: bool = CONST_DEFAULT_USE_POINT_PROMPTS,
     bool_smallParticle: bool = CONST_DEFAULT_SMALL_PARTICLE,
     str_device: tp.Optional[str] = None,
     bool_retinaMasks: bool = CONST_DEFAULT_RETINA_MASKS,
     bool_saveIndividualMasks: bool = CONST_DEFAULT_SAVE_INDIVIDUAL_MASKS,
 ) -> tp.Dict[str, tp.Any]:
-    """외부 호출용 헬퍼 함수."""
+    """스크립트 외부에서 사용할 수 있는 최상위 실행 헬퍼 함수.
+
+    Args:
+        str_input: 단일 이미지 경로 또는 batch root directory 경로.
+        str_outputDir: 결과 저장 root directory 경로.
+        str_modelConfig: SAM2 설정 파일 경로.
+        str_modelWeights: SAM2 weight 파일 경로.
+        int_roiXMin: ROI 시작 x 좌표.
+        int_roiYMin: ROI 시작 y 좌표.
+        int_roiXMax: ROI 끝 x 좌표.
+        int_roiYMax: ROI 끝 y 좌표.
+        int_bboxEdgeMargin: ROI 경계 제외 margin.
+        int_tileEdgeMargin: tile 경계 제외 margin.
+        float_particleAreaThreshold: particle / fragment 분류 기준 면적.
+        float_maskBinarizeThreshold: raw SAM mask를 binary mask로 바꾸는 threshold.
+        int_minValidMaskArea: 이 값보다 작은 mask는 무시한다.
+        int_maskMorphKernelSize: morphology kernel 크기.
+        int_maskMorphOpenIterations: open 연산 반복 횟수.
+        int_maskMorphCloseIterations: close 연산 반복 횟수.
+        int_imgSize: SAM2 추론 input size.
+        int_tileSize: ROI 분할 타일 크기.
+        int_stride: 타일 stride.
+        int_pointsPerTile: tile당 후보 point 수.
+        int_pointMinDistance: 후보 point 최소 거리.
+        float_pointQualityLevel: point 추출용 quality level.
+        int_pointBatchSize: 한 번의 SAM2 호출에 묶을 point 개수.
+        float_dedupIou: mask 기준 중복 제거 IoU threshold.
+        float_bboxDedupIou: bbox 기준 중복 제거 IoU threshold.
+        bool_usePointPrompts: OpenCV 후보점 기반 point prompt 사용 여부.
+        bool_smallParticle: small particle scale(`184 px = 10 um`) 사용 여부.
+        str_device: 추론 device 문자열. 예: `cpu`, `cuda:0`.
+        bool_retinaMasks: retina mask 사용 여부.
+        bool_saveIndividualMasks: 개별 mask png 저장 여부.
+
+    Returns:
+        단일 입력이면 단일 이미지 summary dict, directory 입력이면 batch summary dict.
+    """
     path_input = Path(str_input)
     path_outputRoot = Path(str_outputDir)
     list_inputGroups = collect_input_groups(path_input)
@@ -1439,6 +1815,7 @@ def run_sam2_aspect_ratio(
     float_scaleMicrometers = CONST_SMALL_PARTICLE_SCALE_MICROMETERS if bool_smallParticle else CONST_SCALE_MICROMETERS
 
     def create_config(str_groupId: str, path_image: Path) -> Sam2AspectRatioConfig:
+        """현재 실행 파라미터로 이미지별 config 객체를 만든다."""
         return Sam2AspectRatioConfig(
             path_input=path_image,
             path_outputDir=build_image_output_dir(
@@ -1466,7 +1843,6 @@ def run_sam2_aspect_ratio(
             int_pointBatchSize=int_pointBatchSize,
             float_dedupIou=float_dedupIou,
             float_bboxDedupIou=float_bboxDedupIou,
-            bool_multimaskOutput=bool_multimaskOutput,
             bool_usePointPrompts=bool_usePointPrompts,
             bool_smallParticle=bool_smallParticle,
             float_scalePixels=float_scalePixels,
@@ -1562,7 +1938,12 @@ def run_sam2_aspect_ratio(
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    """CLI 인자 파서 생성."""
+    """CLI 인자 파서를 생성한다.
+
+    Returns:
+        본 스크립트가 지원하는 모든 command-line option이 등록된
+        `argparse.ArgumentParser` 객체.
+    """
     obj_parser = argparse.ArgumentParser(
         description="SAM2로 객체를 분할하고 particle / fragment 분류 및 particle 종횡비를 계산합니다.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -1725,12 +2106,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="retina mask 사용",
     )
     obj_parser.add_argument(
-        "--multimask_output",
-        action=argparse.BooleanOptionalAction,
-        default=CONST_DEFAULT_MULTIMASK_OUTPUT,
-        help="point prompt 당 여러 mask 후보를 받을지 여부",
-    )
-    obj_parser.add_argument(
         "--use_point_prompts",
         action=argparse.BooleanOptionalAction,
         default=CONST_DEFAULT_USE_POINT_PROMPTS,
@@ -1753,7 +2128,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    """CLI 진입점."""
+    """CLI 진입점.
+
+    Returns:
+        없음. command-line argument를 파싱한 뒤 파이프라인을 실행하고 summary를
+        표준 출력에 JSON 형태로 출력한다.
+    """
     obj_args = build_arg_parser().parse_args()
 
     dict_summary = run_sam2_aspect_ratio(
@@ -1782,7 +2162,6 @@ def main() -> None:
         int_pointBatchSize=obj_args.point_batch_size,
         float_dedupIou=obj_args.dedup_iou,
         float_bboxDedupIou=obj_args.bbox_dedup_iou,
-        bool_multimaskOutput=obj_args.multimask_output,
         bool_usePointPrompts=obj_args.use_point_prompts,
         bool_smallParticle=obj_args.small_particle,
         str_device=obj_args.device,
