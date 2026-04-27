@@ -1,1 +1,7 @@
 요청사항.txt
+__pycache__/
+*.pt
+*.pth
+model/
+out_*/
+.claude/
