@@ -95,7 +95,12 @@ def detect_acicular_lsd(
     float_scale_pixels: float,
     float_scale_um: float,
     int_edge_margin: int = 8,
-) -> tp.Tuple[tp.List[PrimaryParticleMeasurement], tp.List[np.ndarray], np.ndarray]:
+) -> tp.Tuple[
+    tp.List[PrimaryParticleMeasurement],
+    tp.List[np.ndarray],
+    np.ndarray,
+    tp.Dict[str, np.ndarray],
+]:
     """Detect acicular particles with LSD and measure thickness via perpendicular profile.
 
     Args:
@@ -108,7 +113,9 @@ def detect_acicular_lsd(
         int_edge_margin: Pixels from ROI edge to discard.
 
     Returns:
-        (list_measurements, list_masks, arr_debug_bgr)
+        (list_measurements, list_masks, arr_debug_bgr, dict_step_images)
+        dict_step_images keys: lsd_01_preprocessed, lsd_02_otsu_thresh,
+            lsd_03_raw_detections, lsd_04_after_filter, lsd_05_after_dedup
     """
     int_roiH, int_roiW = arr_roi_gray.shape[:2]
     float_px_per_um = float_scale_pixels / max(float_scale_um, 1e-9)
@@ -117,16 +124,33 @@ def detect_acicular_lsd(
     arr_eq = obj_clahe.apply(arr_roi_gray)
     arr_blur = cv2.GaussianBlur(arr_eq, (3, 3), 0)
 
-    float_otsu_thresh, _ = cv2.threshold(arr_blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    float_otsu_thresh, arr_otsu_binary = cv2.threshold(
+        arr_blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
     obj_lsd = cv2.createLineSegmentDetector(0)
     arr_lines, arr_widths, _, _ = obj_lsd.detect(arr_blur)
+
+    # --- step images ---
+    dict_steps: tp.Dict[str, np.ndarray] = {
+        "lsd_01_preprocessed": cv2.cvtColor(arr_blur, cv2.COLOR_GRAY2BGR),
+        "lsd_02_otsu_thresh": cv2.cvtColor(arr_otsu_binary, cv2.COLOR_GRAY2BGR),
+    }
 
     list_objects: tp.List[PrimaryParticleMeasurement] = []
     list_masks: tp.List[np.ndarray] = []
 
     if arr_lines is None:
-        return list_objects, list_masks, arr_roi_bgr.copy()
+        dict_steps["lsd_03_raw_detections"] = arr_roi_bgr.copy()
+        dict_steps["lsd_04_after_filter"] = arr_roi_bgr.copy()
+        dict_steps["lsd_05_after_dedup"] = arr_roi_bgr.copy()
+        return list_objects, list_masks, arr_roi_bgr.copy(), dict_steps
+
+    # step 3: raw LSD detections (yellow)
+    arr_step_raw = arr_roi_bgr.copy()
+    for arr_line in arr_lines:
+        fx1, fy1, fx2, fy2 = arr_line[0]
+        cv2.line(arr_step_raw, (int(fx1), int(fy1)), (int(fx2), int(fy2)), (0, 255, 255), 1)
+    dict_steps["lsd_03_raw_detections"] = arr_step_raw
 
     float_ar_loose = min(float_acicular_threshold + 0.20, 0.65)
     list_cands: tp.List[tp.Dict[str, float]] = []
@@ -143,6 +167,15 @@ def detect_acicular_lsd(
             "x1": float_x1, "y1": float_y1, "x2": float_x2, "y2": float_y2,
             "length": float_len, "angle": float_angle,
         })
+
+    # step 4: after length/AR filter (cyan)
+    arr_step_filtered = arr_roi_bgr.copy()
+    for dict_c in list_cands:
+        cv2.line(arr_step_filtered,
+                 (int(dict_c["x1"]), int(dict_c["y1"])),
+                 (int(dict_c["x2"]), int(dict_c["y2"])),
+                 (255, 255, 0), 1)
+    dict_steps["lsd_04_after_filter"] = arr_step_filtered
 
     list_cands.sort(key=lambda d: d["length"], reverse=True)
     list_accepted: tp.List[tp.Dict[str, float]] = []
@@ -161,6 +194,15 @@ def detect_acicular_lsd(
                 break
         if not bool_dup:
             list_accepted.append(dict_c)
+
+    # step 5: after deduplication (orange)
+    arr_step_deduped = arr_roi_bgr.copy()
+    for dict_c in list_accepted:
+        cv2.line(arr_step_deduped,
+                 (int(dict_c["x1"]), int(dict_c["y1"])),
+                 (int(dict_c["x2"]), int(dict_c["y2"])),
+                 (0, 165, 255), 1)
+    dict_steps["lsd_05_after_dedup"] = arr_step_deduped
 
     print(
         f"[LSD] 원본 {len(arr_lines)}개 → 필터 {len(list_cands)}개 "
@@ -252,4 +294,4 @@ def detect_acicular_lsd(
                  (0, 255, 0) if str_category == "acicular" else (0, 128, 255), 1)
 
     print(f"[LSD] → 최종 {len(list_objects)}개", flush=True)
-    return list_objects, list_masks, arr_debug
+    return list_objects, list_masks, arr_debug, dict_steps

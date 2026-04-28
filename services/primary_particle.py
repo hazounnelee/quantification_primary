@@ -960,6 +960,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
         dict_roi: tp.Dict[str, int],
         dict_debug: tp.Dict[str, tp.Any],
         arr_opencvDebugMask: tp.Optional[np.ndarray] = None,
+        dict_lsdSteps: tp.Optional[tp.Dict[str, np.ndarray]] = None,
     ) -> None:
         """이미지, CSV, JSON, histogram 등 1차 입자 분석 산출물을 저장한다."""
         self.obj_config.path_outputDir.mkdir(parents=True, exist_ok=True)
@@ -982,12 +983,20 @@ class PrimaryParticleService(Sam2AspectRatioService):
         cv2.imwrite(str(self.obj_config.path_outputDir / "03_overlay_roi.png"), arr_overlayRoi)
         cv2.imwrite(str(self.obj_config.path_outputDir / "04_overlay_full.png"), arr_overlayFull)
 
-        # OpenCV debug mask (침상 hybrid 모드에서만 생성)
+        # OpenCV/LSD debug image
         if arr_opencvDebugMask is not None:
             cv2.imwrite(
                 str(self.obj_config.path_outputDir / "05_opencv_candidates.png"),
-                arr_opencvDebugMask * 255,
+                arr_opencvDebugMask,
             )
+
+        # LSD step-by-step images (lsd_01..05)
+        if dict_lsdSteps:
+            for str_name, arr_step in dict_lsdSteps.items():
+                cv2.imwrite(
+                    str(self.obj_config.path_outputDir / f"{str_name}.png"),
+                    arr_step,
+                )
 
         # Sphere detection debug (자동 구 검출 모드에서만 생성)
         arr_sphereDbg: tp.Optional[np.ndarray] = getattr(self, "_arr_sphereDebug", None)
@@ -1068,7 +1077,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
         # ── LSD 직접 측정 모드 (SAM2 불필요) ────────────────────
         if self.obj_primary_config.str_measureMode == "lsd":
             arr_roiGray = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
-            list_objects, list_validMasks, arr_opencvDebugMask = detect_acicular_lsd(
+            list_objects, list_validMasks, arr_opencvDebugMask, dict_lsdSteps = detect_acicular_lsd(
                 arr_roiGray,
                 arr_inputRoiBgr,
                 float_acicular_threshold=self.obj_primary_config.float_acicularThreshold,
@@ -1098,6 +1107,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
                 list_objects, list_validMasks,
                 dict_summary, dict_roi, dict_debug,
                 arr_opencvDebugMask=arr_opencvDebugMask,
+                dict_lsdSteps=dict_lsdSteps,
             )
             return PrimaryParticleResult(list_objects=list_objects, dict_summary=dict_summary)
 
