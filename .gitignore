@@ -4,4 +4,5 @@ __pycache__/
 *.pth
 model/
 out_*/
+out_pkg_test_*/
 .claude/
