@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """1차 입자 두께 측정 CLI 진입점."""
+import argparse
 import json
 import sys
 import time
 
 from services.primary_particle import run_primary_particle_analysis, build_primary_arg_parser
+from configs import get_analysis_preset
 from utils.metrics import json_default
 
 
@@ -15,7 +17,34 @@ def main() -> None:
         import io
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
+    # 1차 파싱: --particle_type / --magnification 만 먼저 읽어 preset 결정
+    obj_preParser = argparse.ArgumentParser(add_help=False)
+    obj_preParser.add_argument("--particle_type", default=None)
+    obj_preParser.add_argument("--magnification", default=None)
+    obj_preArgs, _ = obj_preParser.parse_known_args()
+
+    # 메인 파서 구성
     obj_parser = build_primary_arg_parser()
+
+    # preset 적용: set_defaults 는 CLI에서 명시적으로 지정한 값에는 영향 없음
+    if obj_preArgs.particle_type is not None:
+        str_mag = obj_preArgs.magnification or "50k"
+        dict_preset = get_analysis_preset(obj_preArgs.particle_type, str_mag)
+        if dict_preset:
+            obj_parser.set_defaults(**dict_preset)
+            print(
+                f"[preset] {obj_preArgs.particle_type}/{str_mag} 프리셋 적용 "
+                f"({len(dict_preset)}개 파라미터)",
+                flush=True,
+            )
+        else:
+            print(
+                f"[preset] 알 수 없는 조합: {obj_preArgs.particle_type}/{str_mag} "
+                "(기본값 사용)",
+                flush=True,
+            )
+
+    # 2차 파싱: preset 이 기본값으로 설정된 상태에서 모든 인자 파싱
     obj_args = obj_parser.parse_args()
     float_start = time.perf_counter()
 
