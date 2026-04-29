@@ -1039,6 +1039,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
                 float_scale_pixels=self.obj_config.float_scalePixels,
                 float_scale_um=self.obj_config.float_scaleMicrometers,
                 int_edge_margin=self.obj_config.int_bboxEdgeMargin,
+                float_area_threshold=self.obj_config.float_particleAreaThreshold,
             )
 
             int_primaryCount = sum(

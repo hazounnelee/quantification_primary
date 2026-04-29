@@ -20,18 +20,19 @@ def measure_perpendicular_thickness(
     float_x2: float,
     float_y2: float,
     float_px_per_um: float,
-) -> float:
-    """Scan perpendicular to a line segment and return the needle width in pixels.
+) -> tp.Tuple[float, float]:
+    """Scan perpendicular to a line segment; return (needle_width_px, perp_offset_px).
 
-    Uses global Otsu threshold and picks the bright region closest to the scan
-    center to avoid spanning multiple needles in dense images.
-    Returns 0.0 if no valid sample found.
+    perp_offset_px: signed distance from the LSD edge line to the bright-region
+    centre along the perpendicular direction (-uy, ux).  Used by the caller to
+    shift the mask rectangle from the detected edge onto the needle body.
+    Returns (0.0, 0.0) when no valid sample is found.
     """
     float_dx = float_x2 - float_x1
     float_dy = float_y2 - float_y1
     float_length = float(np.sqrt(float_dx ** 2 + float_dy ** 2))
     if float_length < 1.0:
-        return 0.0
+        return 0.0, 0.0
     float_ux = float_dx / float_length
     float_uy = float_dy / float_length
     float_px = -float_uy
@@ -41,6 +42,7 @@ def measure_perpendicular_thickness(
     int_center = int_half_scan
     arr_scan = np.arange(-int_half_scan, int_half_scan + 1, dtype=np.float32)
     list_widths: tp.List[float] = []
+    list_offsets: tp.List[float] = []
     for float_t in np.linspace(0.2, 0.8, CONST_LSD_PERP_N_SAMPLES):
         float_sx = float_x1 + float_t * float_dx
         float_sy = float_y1 + float_t * float_dy
@@ -72,7 +74,11 @@ def measure_perpendicular_thickness(
         int_width = tpl_best[1] - tpl_best[0] + 1
         if int_width > 1:
             list_widths.append(float(int_width))
-    return float(np.median(list_widths)) if list_widths else 0.0
+            # signed distance (px) from LSD edge line to bright-region centre
+            list_offsets.append((tpl_best[0] + tpl_best[1]) / 2.0 - int_center)
+    if not list_widths:
+        return 0.0, 0.0
+    return float(np.median(list_widths)), float(np.median(list_offsets))
 
 
 def _is_bbox_near_edge(
@@ -95,6 +101,7 @@ def detect_acicular_lsd(
     float_scale_pixels: float,
     float_scale_um: float,
     int_edge_margin: int = 8,
+    float_area_threshold: float = 0.0,
 ) -> tp.Tuple[
     tp.List[PrimaryParticleMeasurement],
     tp.List[np.ndarray],
@@ -111,6 +118,7 @@ def detect_acicular_lsd(
         float_scale_pixels: Scale bar length in pixels.
         float_scale_um: Scale bar length in micrometers.
         int_edge_margin: Pixels from ROI edge to discard.
+        float_area_threshold: Minimum mask area in pixels²; smaller masks are dropped.
 
     Returns:
         (list_measurements, list_masks, arr_debug_bgr, dict_step_images)
@@ -219,7 +227,7 @@ def detect_acicular_lsd(
         float_y2 = dict_c["y2"]
         float_len = dict_c["length"]
 
-        float_thickness = measure_perpendicular_thickness(
+        float_thickness, float_offset = measure_perpendicular_thickness(
             arr_blur, float_otsu_thresh,
             float_x1, float_y1, float_x2, float_y2,
             float_px_per_um,
@@ -240,11 +248,19 @@ def detect_acicular_lsd(
         float_px_dir = -float_uy
         float_py_dir = float_ux
 
+        # Shift from the detected edge line to the needle body centre.
+        # float_offset is the signed distance (px) along (float_px_dir, float_py_dir)
+        # from the LSD edge to the bright-region centre measured in the scan.
+        float_nx1 = float_x1 + float_offset * float_px_dir
+        float_ny1 = float_y1 + float_offset * float_py_dir
+        float_nx2 = float_x2 + float_offset * float_px_dir
+        float_ny2 = float_y2 + float_offset * float_py_dir
+
         arr_corners = np.float32([
-            [float_x1 - float_half_t * float_px_dir, float_y1 - float_half_t * float_py_dir],
-            [float_x1 + float_half_t * float_px_dir, float_y1 + float_half_t * float_py_dir],
-            [float_x2 + float_half_t * float_px_dir, float_y2 + float_half_t * float_py_dir],
-            [float_x2 - float_half_t * float_px_dir, float_y2 - float_half_t * float_py_dir],
+            [float_nx1 - float_half_t * float_px_dir, float_ny1 - float_half_t * float_py_dir],
+            [float_nx1 + float_half_t * float_px_dir, float_ny1 + float_half_t * float_py_dir],
+            [float_nx2 + float_half_t * float_px_dir, float_ny2 + float_half_t * float_py_dir],
+            [float_nx2 - float_half_t * float_px_dir, float_ny2 - float_half_t * float_py_dir],
         ])
 
         int_bx, int_by, int_bw, int_bh = cv2.boundingRect(arr_corners.astype(np.int32))
@@ -259,8 +275,11 @@ def detect_acicular_lsd(
         arr_mask = np.zeros((int_roiH, int_roiW), dtype=np.uint8)
         cv2.fillPoly(arr_mask, [arr_corners.astype(np.int32).reshape(-1, 1, 2)], 1)
 
-        float_mcx = (float_x1 + float_x2) / 2.0
-        float_mcy = (float_y1 + float_y2) / 2.0
+        if float_area_threshold > 0.0 and float(arr_mask.sum()) < float_area_threshold:
+            continue
+
+        float_mcx = (float_nx1 + float_nx2) / 2.0
+        float_mcy = (float_ny1 + float_ny2) / 2.0
 
         list_objects.append(PrimaryParticleMeasurement(
             int_index=int_idx,
@@ -287,7 +306,7 @@ def detect_acicular_lsd(
         list_masks.append(arr_mask)
 
         cv2.line(arr_debug,
-                 (int(float_x1), int(float_y1)), (int(float_x2), int(float_y2)),
+                 (int(float_nx1), int(float_ny1)), (int(float_nx2), int(float_ny2)),
                  (0, 255, 0) if str_category == "acicular" else (0, 128, 255), 1)
 
     print(f"[LSD] → 최종 {len(list_objects)}개", flush=True)
