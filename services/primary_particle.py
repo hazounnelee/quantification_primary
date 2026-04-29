@@ -266,25 +266,13 @@ class PrimaryParticleService(Sam2AspectRatioService):
         int_vertical = min(
             self.get_longest_span(arr_refined, bool_horizontal=False), int_bh)
 
-        # 분류
-        # particle_type 에 따라 목표 형태만 해당 카테고리로 분류하고
-        # 나머지(면적 미달 포함)는 fragment 처리 — 분석 대상이 아닌 마스크
+        # 분류: 면적 미달은 fragment, 그 외는 AR 기준으로 acicular/plate 분류
         if int_maskArea < int(round(self.obj_config.float_particleAreaThreshold)):
             str_category = "fragment"
         elif float_aspectRatio < self.obj_primary_config.float_acicularThreshold:
-            # 침상 형태 (AR < threshold)
-            str_category = (
-                "acicular"
-                if self.obj_primary_config.str_particleType != "plate"
-                else "fragment"  # 판상 모드에서 침상은 분석 대상 아님
-            )
+            str_category = "acicular"
         else:
-            # 판상 형태 (AR >= threshold)
-            str_category = (
-                "plate"
-                if self.obj_primary_config.str_particleType != "acicular"
-                else "fragment"  # 침상 모드에서 판상은 분석 대상 아님
-            )
+            str_category = "plate"
 
         return PrimaryParticleMeasurement(
             int_index=int_index,
@@ -835,11 +823,9 @@ class PrimaryParticleService(Sam2AspectRatioService):
         self,
         list_objects: tp.List[PrimaryParticleMeasurement],
     ) -> tp.Dict[str, tp.Any]:
-        """침상/판상별 두께·종횡비 통계를 포함한 summary dict 를 생성한다."""
+        """대상 입자 유형의 두께·종횡비 통계를 포함한 summary dict 를 생성한다."""
 
-        list_acicular = [o for o in list_objects if o.str_category == "acicular"]
-        list_plate = [o for o in list_objects if o.str_category == "plate"]
-        list_fragment = [o for o in list_objects if o.str_category == "fragment"]
+        str_type = self.obj_primary_config.str_particleType
 
         def _stats(
             list_vals: tp.List[float],
@@ -861,11 +847,15 @@ class PrimaryParticleService(Sam2AspectRatioService):
             float_scaleMicrometers=self.obj_config.float_scaleMicrometers,
         )
 
+        list_thicknessUm = [o.float_thicknessUm for o in list_objects]
+        list_longAxisUm  = [o.float_longAxisUm  for o in list_objects]
+        list_aspectRatio = [o.float_aspectRatio  for o in list_objects]
+
         return {
             "input_path": str(self.obj_config.path_input),
             "output_dir": str(self.obj_config.path_outputDir),
             "model_weights_path": str(self.obj_config.path_modelWeights),
-            "particle_type": str(self.obj_primary_config.str_particleType),
+            "particle_type": str_type,
             "magnification": str(self.obj_primary_config.str_magnification),
             "scale_pixels": float(self.obj_config.float_scalePixels),
             "scale_micrometers": float(self.obj_config.float_scaleMicrometers),
@@ -876,18 +866,11 @@ class PrimaryParticleService(Sam2AspectRatioService):
             "center_crop_ratio": float(self.obj_primary_config.float_centerCropRatio),
             "particle_area_threshold": float(self.obj_config.float_particleAreaThreshold),
             "num_total_objects": len(list_objects),
-            "num_acicular": len(list_acicular),
-            "num_plate": len(list_plate),
-            "num_fragment": len(list_fragment),
-            "acicular_thickness_um": _stats([o.float_thicknessUm for o in list_acicular]),
-            "acicular_long_axis_um": _stats([o.float_longAxisUm for o in list_acicular]),
-            "acicular_aspect_ratio": _stats([o.float_aspectRatio for o in list_acicular]),
-            "plate_thickness_um": _stats([o.float_thicknessUm for o in list_plate]),
-            "plate_long_axis_um": _stats([o.float_longAxisUm for o in list_plate]),
-            "plate_aspect_ratio": _stats([o.float_aspectRatio for o in list_plate]),
-            "all_primary_thickness_um": _stats(
-                [o.float_thicknessUm for o in list_acicular + list_plate]
-            ),
+            f"num_{str_type}": len(list_objects),
+            f"{str_type}_thickness_um": _stats(list_thicknessUm),
+            f"{str_type}_long_axis_um": _stats(list_longAxisUm),
+            f"{str_type}_aspect_ratio": _stats(list_aspectRatio),
+            "all_primary_thickness_um": _stats(list_thicknessUm),
         }
 
     # ----------------------------------------------------------
@@ -1016,11 +999,12 @@ class PrimaryParticleService(Sam2AspectRatioService):
                 for obj_m in list_objects:
                     obj_writer.writerow(asdict(obj_m))
 
-        # acicular.csv / plate.csv
-        for str_cat, str_fname in [("acicular", "acicular.csv"), ("plate", "plate.csv")]:
-            list_rows = [asdict(o) for o in list_objects if o.str_category == str_cat]
-            path_csv = self.obj_config.path_outputDir / str_fname
-            with path_csv.open("w", newline="", encoding="utf-8-sig") as obj_f:
+        # target-type CSV (acicular.csv or plate.csv, never both)
+        str_type = self.obj_primary_config.str_particleType
+        if str_type in ("acicular", "plate"):
+            list_rows = [asdict(o) for o in list_objects if o.str_category == str_type]
+            path_csv_type = self.obj_config.path_outputDir / f"{str_type}.csv"
+            with path_csv_type.open("w", newline="", encoding="utf-8-sig") as obj_f:
                 if list_rows:
                     obj_writer = csv.DictWriter(
                         obj_f, fieldnames=list(list_rows[0].keys()))
@@ -1131,8 +1115,10 @@ class PrimaryParticleService(Sam2AspectRatioService):
             obj_m = self.measure_primary_mask(arr_mask, int_index, float_conf)
             if obj_m is None:
                 continue
-            if (self.obj_primary_config.str_particleType in ("acicular", "plate")
-                    and obj_m.str_category == "fragment"):
+            str_target = self.obj_primary_config.str_particleType
+            if obj_m.str_category == "fragment":
+                continue
+            if str_target in ("acicular", "plate") and obj_m.str_category != str_target:
                 continue
             list_objects.append(obj_m)
             list_validMasks.append(self.refine_mask_for_area(arr_mask).astype(np.uint8))

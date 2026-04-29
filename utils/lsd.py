@@ -229,12 +229,9 @@ def detect_acicular_lsd(
 
         float_ar = float_thickness / float_len
 
-        if float_ar < float_acicular_threshold:
-            str_category = "acicular" if str_particle_type != "plate" else "fragment"
-        else:
-            str_category = "plate" if str_particle_type != "acicular" else "fragment"
+        str_category = "acicular" if float_ar < float_acicular_threshold else "plate"
 
-        if str_particle_type in ("acicular", "plate") and str_category == "fragment":
+        if str_particle_type in ("acicular", "plate") and str_category != str_particle_type:
             continue
 
         float_ux = (float_x2 - float_x1) / max(float_len, 1.0)
