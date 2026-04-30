@@ -18,9 +18,9 @@ import matplotlib.pyplot as plt
 
 from core.schema import Sam2AspectRatioConfig, ObjectMeasurement, Sam2AspectRatioResult
 from models import load_sam2_model
+from utils.image import draw_label_no_overlap, create_processing_tiles, enhance_image_texture, sample_interest_points
 from utils.metrics import convert_pixels_to_micrometers, calculate_mean_from_optional_values, calculate_percentage, normalize_image_to_uint8
 from utils.iou import calculate_binary_iou, calculate_box_iou
-from utils.image import create_processing_tiles, enhance_image_texture, sample_interest_points
 from utils.io import iter_chunks, collect_input_groups, build_image_output_dir
 
 
@@ -42,7 +42,12 @@ def load_particle_mean_sizes_from_csv(path_particlesCsv: Path) -> np.ndarray:
         obj_reader = csv.DictReader(obj_f)
         for dict_row in obj_reader:
             try:
-                list_meanSizes.append(float(dict_row["float_eqDiameterUm"]))
+                if "float_eqDiameterUm" in dict_row:
+                    list_meanSizes.append(float(dict_row["float_eqDiameterUm"]))
+                else:
+                    float_h = float(dict_row["float_longestHorizontalUm"])
+                    float_v = float(dict_row["float_longestVerticalUm"])
+                    list_meanSizes.append((float_h + float_v) / 2.0)
             except (KeyError, TypeError, ValueError):
                 continue
 
@@ -831,6 +836,9 @@ class Sam2AspectRatioService:
             float_cx = float(int_x + int_w / 2.0)
             float_cy = float(int_y + int_h / 2.0)
 
+        int_horizontal = min(self.get_longest_span(arr_refinedMask, bool_horizontal=True), int_w)
+        int_vertical = min(self.get_longest_span(arr_refinedMask, bool_horizontal=False), int_h)
+
         str_category = (
             "particle"
             if int_maskArea >= int(round(self.obj_config.float_particleAreaThreshold))
@@ -861,6 +869,10 @@ class Sam2AspectRatioService:
             float_bboxHeightUm=self.convert_pixels_to_micrometers(float(int_h)),
             float_centroidX=float_cx,
             float_centroidY=float_cy,
+            int_longestHorizontal=int_horizontal,
+            int_longestVertical=int_vertical,
+            float_longestHorizontalUm=self.convert_pixels_to_micrometers(float(int_horizontal)),
+            float_longestVerticalUm=self.convert_pixels_to_micrometers(float(int_vertical)),
             float_eqDiameterUm=float_eqDiameterUm,
             float_sphericity=float_sphericity,
         )
@@ -881,52 +893,40 @@ class Sam2AspectRatioService:
         Returns:
             mask overlay, contour, bbox, 텍스트 라벨이 그려진 BGR 이미지.
         """
-        arr_overlay = arr_imageBgr.copy()
+        int_h, int_w = arr_imageBgr.shape[:2]
+        arr_overlay = cv2.resize(arr_imageBgr, (int_w * 2, int_h * 2), interpolation=cv2.INTER_LINEAR)
 
         for obj_measurement, arr_mask in zip(list_objects, list_masks):
-            tpl_color = (60, 220, 60) if obj_measurement.str_category == "particle" else (
-                0, 165, 255)
-            arr_overlay[arr_mask > 0] = (
-                arr_overlay[arr_mask > 0].astype(np.float32) * 0.55
+            arr_mask2 = cv2.resize(arr_mask, (int_w * 2, int_h * 2), interpolation=cv2.INTER_NEAREST)
+            tpl_color = (60, 220, 60) if obj_measurement.str_category == "particle" else (0, 165, 255)
+            arr_overlay[arr_mask2 > 0] = (
+                arr_overlay[arr_mask2 > 0].astype(np.float32) * 0.55
                 + np.array(tpl_color, dtype=np.float32) * 0.45
             ).astype(np.uint8)
 
+        list_placedRects: tp.List[tp.Tuple[int, int, int, int]] = []
         for obj_measurement, arr_mask in zip(list_objects, list_masks):
             arr_contour = self.extract_largest_contour(arr_mask)
             if arr_contour is None:
                 continue
 
-            tpl_color = (0, 255, 0) if obj_measurement.str_category == "particle" else (
-                0, 140, 255)
-            cv2.drawContours(arr_overlay, [arr_contour], -1, tpl_color, 1)
+            arr_contour2 = (arr_contour * 2).astype(np.int32)
+            tpl_color = (0, 255, 0) if obj_measurement.str_category == "particle" else (0, 140, 255)
+            cv2.drawContours(arr_overlay, [arr_contour2], -1, tpl_color, 1)
+
+            int_cx2 = int(round(obj_measurement.float_centroidX * 2))
+            int_cy2 = int(round(obj_measurement.float_centroidY * 2))
+
+            if obj_measurement.str_category == "particle" and self.obj_config.bool_useEqDiameter:
+                int_eqRadius2 = int(round(math.sqrt(obj_measurement.int_maskArea / math.pi) * 2))
+                cv2.circle(arr_overlay, (int_cx2, int_cy2), int_eqRadius2, tpl_color, 1)
 
             if obj_measurement.str_category == "particle":
-                int_eqRadius = int(round(math.sqrt(obj_measurement.int_maskArea / math.pi)))
-                cv2.circle(
-                    arr_overlay,
-                    (int(round(obj_measurement.float_centroidX)), int(round(obj_measurement.float_centroidY))),
-                    int_eqRadius,
-                    tpl_color,
-                    1,
-                )
-
-            int_labelX = obj_measurement.int_bboxX
-            int_labelY = max(14, obj_measurement.int_bboxY - 4)
-            if obj_measurement.str_category == "particle":
-                str_label = f"P{obj_measurement.int_index} A={obj_measurement.int_maskArea}"
-            else:
-                str_label = f"F{obj_measurement.int_index} A={obj_measurement.int_maskArea}"
-
-            cv2.putText(
-                arr_overlay,
-                str_label,
-                (int_labelX, int_labelY),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.40,
-                tpl_color,
-                1,
-                cv2.LINE_AA,
-            )
+                list_lines = [f"d={obj_measurement.float_eqDiameterUm:.2f}um"]
+                if obj_measurement.float_sphericity is not None:
+                    list_lines.append(f"S={obj_measurement.float_sphericity:.2f}")
+                draw_label_no_overlap(
+                    arr_overlay, list_lines, int_cx2, int_cy2, tpl_color, list_placedRects)
 
         return arr_overlay
 
@@ -952,10 +952,13 @@ class Sam2AspectRatioService:
             for obj_item in list_particles
             if obj_item.float_sphericity is not None
         ]
-        list_particleSizes = [
-            obj_item.float_eqDiameterUm
-            for obj_item in list_particles
-        ]
+        if self.obj_config.bool_useEqDiameter:
+            list_particleSizes = [obj_item.float_eqDiameterUm for obj_item in list_particles]
+        else:
+            list_particleSizes = [
+                (obj_item.float_longestHorizontalUm + obj_item.float_longestVerticalUm) / 2.0
+                for obj_item in list_particles
+            ]
         float_micrometersPerPixel = convert_pixels_to_micrometers(
             float_pixels=1.0,
             float_scalePixels=self.obj_config.float_scalePixels,
@@ -1062,10 +1065,13 @@ class Sam2AspectRatioService:
         self.obj_config.path_outputDir.mkdir(parents=True, exist_ok=True)
 
         arr_overlayFull = arr_inputBgr.copy()
+        int_roiW = dict_roi["x_max"] - dict_roi["x_min"]
+        int_roiH = dict_roi["y_max"] - dict_roi["y_min"]
+        arr_overlayRoiSmall = cv2.resize(arr_overlayRoi, (int_roiW, int_roiH), interpolation=cv2.INTER_LINEAR)
         arr_overlayFull[
             dict_roi["y_min"]:dict_roi["y_max"],
             dict_roi["x_min"]:dict_roi["x_max"],
-        ] = arr_overlayRoi
+        ] = arr_overlayRoiSmall
         cv2.rectangle(
             arr_overlayFull,
             (dict_roi["x_min"], dict_roi["y_min"]),

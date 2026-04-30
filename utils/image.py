@@ -4,6 +4,70 @@ import cv2
 import numpy as np
 
 
+def draw_label_no_overlap(
+    arr_img: np.ndarray,
+    list_lines: tp.List[str],
+    int_anchorX: int,
+    int_anchorY: int,
+    tpl_color: tp.Tuple[int, int, int],
+    list_placedRects: tp.List[tp.Tuple[int, int, int, int]],
+    float_fontScale: float = 0.5,
+) -> None:
+    """Draw a multi-line label near anchor without overlapping already-placed labels.
+
+    Tries 8 candidate positions around the anchor. Draws a dark outline under the
+    colored text for readability. Appends the placed rect to list_placedRects.
+    """
+    int_font = cv2.FONT_HERSHEY_SIMPLEX
+    int_lineH, int_maxW = 0, 0
+    for str_line in list_lines:
+        (int_tw, int_th), int_bl = cv2.getTextSize(str_line, int_font, float_fontScale, 1)
+        int_maxW = max(int_maxW, int_tw)
+        int_lineH = max(int_lineH, int_th + int_bl)
+
+    int_gap = 2
+    int_totalH = int_lineH * len(list_lines) + int_gap * (len(list_lines) - 1)
+    int_pad = 4
+    int_imgH, int_imgW = arr_img.shape[:2]
+
+    list_candidates = [
+        (int_anchorX - int_maxW // 2, int_anchorY - int_totalH - int_pad),
+        (int_anchorX + int_pad, int_anchorY - int_totalH // 2),
+        (int_anchorX - int_maxW // 2, int_anchorY + int_pad),
+        (int_anchorX - int_maxW - int_pad, int_anchorY - int_totalH // 2),
+        (int_anchorX + int_pad, int_anchorY - int_totalH - int_pad),
+        (int_anchorX - int_maxW - int_pad, int_anchorY - int_totalH - int_pad),
+        (int_anchorX + int_pad, int_anchorY + int_pad),
+        (int_anchorX - int_maxW - int_pad, int_anchorY + int_pad),
+    ]
+
+    def _no_overlap(int_tx: int, int_ty: int) -> bool:
+        tpl_r = (int_tx, int_ty, int_tx + int_maxW, int_ty + int_totalH)
+        return all(
+            tpl_r[2] < r[0] or tpl_r[0] > r[2] or tpl_r[3] < r[1] or tpl_r[1] > r[3]
+            for r in list_placedRects
+        )
+
+    int_tx, int_ty = list_candidates[0]
+    for int_cx, int_cy in list_candidates:
+        int_cx = int(np.clip(int_cx, 0, max(0, int_imgW - int_maxW)))
+        int_cy = int(np.clip(int_cy, 0, max(0, int_imgH - int_totalH)))
+        if _no_overlap(int_cx, int_cy):
+            int_tx, int_ty = int_cx, int_cy
+            break
+
+    int_tx = int(np.clip(int_tx, 0, max(0, int_imgW - int_maxW)))
+    int_ty = int(np.clip(int_ty, 0, max(0, int_imgH - int_totalH)))
+    list_placedRects.append((int_tx, int_ty, int_tx + int_maxW, int_ty + int_totalH))
+
+    for int_i, str_line in enumerate(list_lines):
+        int_y = int_ty + int_lineH * (int_i + 1) + int_gap * int_i
+        cv2.putText(arr_img, str_line, (int_tx, int_y), int_font,
+                    float_fontScale, (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(arr_img, str_line, (int_tx, int_y), int_font,
+                    float_fontScale, tpl_color, 1, cv2.LINE_AA)
+
+
 def compute_adaptive_block_size(
     int_h: int,
     int_w: int,

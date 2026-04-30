@@ -151,6 +151,7 @@ def run_secondary_particle_analysis(
     str_device: tp.Optional[str] = None,
     bool_retinaMasks: bool = CONST_DEFAULT_RETINA_MASKS,
     bool_saveIndividualMasks: bool = CONST_DEFAULT_SAVE_INDIVIDUAL_MASKS,
+    bool_useEqDiameter: bool = True,
 ) -> tp.Dict[str, tp.Any]:
     """Run secondary particle segmentation and measurement pipeline."""
     path_input = Path(str_input)
@@ -198,6 +199,7 @@ def run_secondary_particle_analysis(
             str_device=str_device,
             bool_retinaMasks=bool_retinaMasks,
             bool_saveIndividualMasks=bool_saveIndividualMasks,
+            bool_useEqDiameter=bool_useEqDiameter,
         )
 
     if not bool_isBatch:
@@ -309,6 +311,9 @@ def build_secondary_arg_parser() -> argparse.ArgumentParser:
                                  "20k=147, 50k=371")
     obj_parser.add_argument("--scale_um", type=float, default=0.0,
                             help="스케일 기준 µm 값 (0 = 배율 preset 사용)")
+    obj_parser.add_argument("--eq_diameter", action=argparse.BooleanOptionalAction, default=True,
+                            help="크기 측정 방법: equivalent circle diameter(기본값) "
+                                 "또는 --no-eq_diameter로 수평/수직 span 평균 사용")
     obj_parser.add_argument("--save_mask_imgs", "--save_individual_masks",
                             dest="save_mask_imgs",
                             action=argparse.BooleanOptionalAction, default=True)

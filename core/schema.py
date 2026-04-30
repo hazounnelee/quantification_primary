@@ -38,6 +38,7 @@ class Sam2AspectRatioConfig:
     str_device: tp.Optional[str] = None
     bool_retinaMasks: bool = True
     bool_saveIndividualMasks: bool = True
+    bool_useEqDiameter: bool = True
 
 
 @dataclass
@@ -54,6 +55,10 @@ class ObjectMeasurement:
     float_bboxHeightUm: float
     float_centroidX: float
     float_centroidY: float
+    int_longestHorizontal: int
+    int_longestVertical: int
+    float_longestHorizontalUm: float
+    float_longestVerticalUm: float
     float_eqDiameterUm: float
     float_sphericity: tp.Optional[float]
 
@@ -77,7 +82,7 @@ class PrimaryParticleConfig(Sam2AspectRatioConfig):
     str_magnification: str = "unknown"
     str_measureMode: str = "sam2"
     bool_lsdAdaptiveThresh: bool = False
-    bool_lsdFuseSegments: bool = False
+    bool_lsdFuseSegments: bool = True
 
 
 @dataclass

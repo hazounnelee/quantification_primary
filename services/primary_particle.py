@@ -21,7 +21,7 @@ from core.schema import (
 )
 from configs import get_analysis_preset
 from utils.metrics import convert_pixels_to_micrometers, calculate_mean_from_optional_values, calculate_percentage, json_default
-from utils.image import detect_sphere_roi, compute_center_roi, compute_adaptive_block_size
+from utils.image import detect_sphere_roi, compute_center_roi, compute_adaptive_block_size, draw_label_no_overlap
 from utils.lsd import detect_acicular_lsd
 from utils.io import collect_input_groups, build_image_output_dir
 from services.sam2_service import Sam2AspectRatioService
@@ -761,23 +761,36 @@ class PrimaryParticleService(Sam2AspectRatioService):
             "fragment": (0,   120, 200),
         }
 
-        arr_overlay = arr_imageBgr.copy()
+        int_h, int_w = arr_imageBgr.shape[:2]
+        arr_overlay = cv2.resize(arr_imageBgr, (int_w * 2, int_h * 2), interpolation=cv2.INTER_LINEAR)
 
-        # 반투명 색칠
         for obj_m, arr_mask in zip(list_objects, list_masks):
+            arr_mask2 = cv2.resize(arr_mask, (int_w * 2, int_h * 2), interpolation=cv2.INTER_NEAREST)
             tpl_c = dict_fill.get(obj_m.str_category, (128, 128, 128))
-            arr_overlay[arr_mask > 0] = (
-                arr_overlay[arr_mask > 0].astype(np.float32) * 0.5
+            arr_overlay[arr_mask2 > 0] = (
+                arr_overlay[arr_mask2 > 0].astype(np.float32) * 0.5
                 + np.array(tpl_c, dtype=np.float32) * 0.5
             ).astype(np.uint8)
 
-        # contour only
+        list_placedRects: tp.List[tp.Tuple[int, int, int, int]] = []
         for obj_m, arr_mask in zip(list_objects, list_masks):
             arr_contour = self.extract_largest_contour(arr_mask)
             if arr_contour is None:
                 continue
+            arr_contour2 = (arr_contour * 2).astype(np.int32)
             tpl_ec = dict_edge.get(obj_m.str_category, (128, 128, 128))
-            cv2.drawContours(arr_overlay, [arr_contour], -1, tpl_ec, 1)
+            cv2.drawContours(arr_overlay, [arr_contour2], -1, tpl_ec, 1)
+
+            if obj_m.str_category in ("acicular", "plate"):
+                int_cx2 = int(round(obj_m.float_centroidX * 2))
+                int_cy2 = int(round(obj_m.float_centroidY * 2))
+                draw_label_no_overlap(
+                    arr_overlay,
+                    [f"{obj_m.float_thicknessUm:.2f}um"],
+                    int_cx2, int_cy2,
+                    tpl_ec,
+                    list_placedRects,
+                )
 
         return arr_overlay
 
@@ -916,10 +929,13 @@ class PrimaryParticleService(Sam2AspectRatioService):
 
         # overlay_full: 원본 이미지 위에 ROI overlay를 덮는다
         arr_overlayFull = arr_inputBgr.copy()
+        int_roiW = dict_roi["x_max"] - dict_roi["x_min"]
+        int_roiH = dict_roi["y_max"] - dict_roi["y_min"]
+        arr_overlayRoiSmall = cv2.resize(arr_overlayRoi, (int_roiW, int_roiH), interpolation=cv2.INTER_LINEAR)
         arr_overlayFull[
             dict_roi["y_min"]:dict_roi["y_max"],
             dict_roi["x_min"]:dict_roi["x_max"],
-        ] = arr_overlayRoi
+        ] = arr_overlayRoiSmall
         cv2.rectangle(
             arr_overlayFull,
             (dict_roi["x_min"], dict_roi["y_min"]),
@@ -1367,7 +1383,7 @@ def run_primary_particle_analysis(
     str_magnification: str = "unknown",
     str_measureMode: str = "sam2",
     bool_lsdAdaptiveThresh: bool = False,
-    bool_lsdFuseSegments: bool = False,
+    bool_lsdFuseSegments: bool = True,
 ) -> tp.Dict[str, tp.Any]:
     """외부에서 호출 가능한 최상위 실행 함수.
 
@@ -1706,7 +1722,7 @@ def build_primary_arg_parser() -> argparse.ArgumentParser:
     )
     obj_parser.add_argument(
         "--lsd_fuse_segments",
-        action=argparse.BooleanOptionalAction, default=False,
+        action=argparse.BooleanOptionalAction, default=True,
         help=(
             "유사 방향(≤10°)이고 겹치거나 인접한 LSD 선분을 하나로 융합한다. "
             "단일 침상이 여러 조각으로 검출될 때 장축 길이를 올바르게 측정한다."
