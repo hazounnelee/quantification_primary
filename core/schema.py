@@ -83,6 +83,7 @@ class PrimaryParticleConfig(Sam2AspectRatioConfig):
     str_measureMode: str = "sam2"
     bool_lsdAdaptiveThresh: bool = False
     bool_lsdFuseSegments: bool = True
+    bool_arScreen: bool = False
 
 
 @dataclass

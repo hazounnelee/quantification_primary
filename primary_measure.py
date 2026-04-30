@@ -119,6 +119,7 @@ def main() -> None:
         str_measureMode=obj_args.measure_mode,
         bool_lsdAdaptiveThresh=obj_args.lsd_adaptive_thresh,
         bool_lsdFuseSegments=obj_args.lsd_fuse_segments,
+        bool_arScreen=obj_args.ar_screen,
     )
 
     print("===== 1차 입자 분석 결과 요약 =====")

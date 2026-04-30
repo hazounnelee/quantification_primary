@@ -308,6 +308,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
         float_minArea: float = CONST_ACICULAR_CANDIDATE_MIN_AREA,
         float_maxArea: float = CONST_ACICULAR_CANDIDATE_MAX_AREA,
         int_maxCandidates: int = 500,
+        bool_arScreen: bool = False,
     ) -> tp.Tuple[tp.List[tp.Tuple[int, int, int, int]], np.ndarray]:
         """connectedComponents + moments 기반으로 침상 후보 bbox를 탐지한다.
 
@@ -378,7 +379,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
 
             # AR = sqrt(l2/l1): 1에 가까울수록 원형, 0에 가까울수록 길쭉
             float_ar = float(np.sqrt(max(0.0, float_l2) / max(1e-9, float_l1)))
-            if float_ar >= float_arScreen:
+            if bool_arScreen and float_ar >= float_arScreen:
                 continue  # 충분히 길쭉하지 않음
 
             if self.is_bbox_near_roi_edge(int_bx, int_by, int_bw, int_bh, int_roiW, int_roiH):
@@ -702,6 +703,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
             arr_roiGray,
             float_arScreen=float_arScreen,
             float_minArea=max(8.0, self.obj_config.float_particleAreaThreshold * 0.5),
+            bool_arScreen=self.obj_primary_config.bool_arScreen,
         )
 
         print(
@@ -1200,6 +1202,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
         str_measureMode: str,
         bool_lsdAdaptiveThresh: bool,
         bool_lsdFuseSegments: bool,
+        bool_arScreen: bool,
     ) -> PrimaryParticleConfig:
         return PrimaryParticleConfig(
             path_input=path_image,
@@ -1247,6 +1250,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
             str_measureMode=str_measureMode,
             bool_lsdAdaptiveThresh=bool_lsdAdaptiveThresh,
             bool_lsdFuseSegments=bool_lsdFuseSegments,
+            bool_arScreen=bool_arScreen,
         )
 
 
@@ -1384,6 +1388,7 @@ def run_primary_particle_analysis(
     str_measureMode: str = "sam2",
     bool_lsdAdaptiveThresh: bool = False,
     bool_lsdFuseSegments: bool = True,
+    bool_arScreen: bool = False,
 ) -> tp.Dict[str, tp.Any]:
     """외부에서 호출 가능한 최상위 실행 함수.
 
@@ -1452,6 +1457,7 @@ def run_primary_particle_analysis(
             str_measureMode=str_measureMode,
             bool_lsdAdaptiveThresh=bool_lsdAdaptiveThresh,
             bool_lsdFuseSegments=bool_lsdFuseSegments,
+            bool_arScreen=bool_arScreen,
         )
 
     # 단일 이미지
@@ -1726,6 +1732,14 @@ def build_primary_arg_parser() -> argparse.ArgumentParser:
         help=(
             "유사 방향(≤10°)이고 겹치거나 인접한 LSD 선분을 하나로 융합한다. "
             "단일 침상이 여러 조각으로 검출될 때 장축 길이를 올바르게 측정한다."
+        ),
+    )
+    obj_parser.add_argument(
+        "--ar_screen",
+        action=argparse.BooleanOptionalAction, default=False,
+        help=(
+            "OpenCV 침상 후보 탐지 시 종횡비(AR) 필터를 적용한다. "
+            "ON이면 AR ≥ threshold인 후보를 제외, OFF(기본)이면 모든 blob을 후보로 통과시킨다."
         ),
     )
 
