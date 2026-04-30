@@ -1,6 +1,7 @@
 from __future__ import annotations
 import csv
 import json
+import math
 import os
 import shutil
 import typing as tp
@@ -30,8 +31,8 @@ def load_particle_mean_sizes_from_csv(path_particlesCsv: Path) -> np.ndarray:
         path_particlesCsv: `particles.csv` 파일 경로. UTF-8 BOM(`utf-8-sig`)로 읽는다.
 
     Returns:
-        각 row의 `(float_longestHorizontalUm + float_longestVerticalUm) / 2` 값을 담은
-        `np.float32` 1차원 배열. 파일이 없거나 유효한 row가 없으면 빈 배열을 반환한다.
+        각 row의 `float_eqDiameterUm` 값을 담은 `np.float32` 1차원 배열.
+        파일이 없거나 유효한 row가 없으면 빈 배열을 반환한다.
     """
     if not path_particlesCsv.exists():
         return np.array([], dtype=np.float32)
@@ -41,11 +42,9 @@ def load_particle_mean_sizes_from_csv(path_particlesCsv: Path) -> np.ndarray:
         obj_reader = csv.DictReader(obj_f)
         for dict_row in obj_reader:
             try:
-                float_horizontal = float(dict_row["float_longestHorizontalUm"])
-                float_vertical = float(dict_row["float_longestVerticalUm"])
+                list_meanSizes.append(float(dict_row["float_eqDiameterUm"]))
             except (KeyError, TypeError, ValueError):
                 continue
-            list_meanSizes.append((float_horizontal + float_vertical) / 2.0)
 
     if not list_meanSizes:
         return np.array([], dtype=np.float32)
@@ -150,6 +149,67 @@ def save_particle_distribution_histogram(
         obj_fig.savefig(path_outputImage, bbox_inches="tight")
     finally:
         plt.close(obj_fig)
+
+
+def load_particle_sphericities_from_csv(path_particlesCsv: Path) -> np.ndarray:
+    if not path_particlesCsv.exists():
+        return np.array([], dtype=np.float32)
+    list_vals: tp.List[float] = []
+    with path_particlesCsv.open("r", newline="", encoding="utf-8-sig") as obj_f:
+        obj_reader = csv.DictReader(obj_f)
+        for dict_row in obj_reader:
+            try:
+                list_vals.append(float(dict_row["float_sphericity"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+    if not list_vals:
+        return np.array([], dtype=np.float32)
+    return np.array(list_vals, dtype=np.float32)
+
+
+def save_sphericity_distribution_histogram(
+    path_particlesCsv: Path,
+    path_outputImage: Path,
+    path_inputImage: Path,
+) -> None:
+    arr_sphs = load_particle_sphericities_from_csv(path_particlesCsv)
+    str_lotNumber = get_lot_number_from_input_path(path_inputImage)
+    obj_fig, obj_ax = plt.subplots(figsize=(9.6, 6.4), dpi=100)
+    try:
+        obj_ax.set_title(str_lotNumber, fontsize=28)
+        obj_ax.set_ylabel("Count", fontsize=20)
+        obj_ax.set_xlabel("Sphericity", fontsize=20)
+        obj_ax.tick_params(axis="both", labelsize=20)
+        if arr_sphs.size == 0:
+            obj_ax.text(0.5, 0.5, "No particle data in particles.csv",
+                        ha="center", va="center", fontsize=13, color="#666666",
+                        transform=obj_ax.transAxes)
+            obj_ax.set_xticks([])
+            obj_ax.set_yticks([])
+        else:
+            int_numBins = int(np.clip(np.sqrt(arr_sphs.size), 5, 20))
+            float_minV = float(np.min(arr_sphs))
+            float_maxV = float(np.max(arr_sphs))
+            float_meanV = float(np.mean(arr_sphs))
+            if abs(float_maxV - float_minV) < 1e-6:
+                float_minV -= 0.5
+                float_maxV += 0.5
+            obj_ax.hist(arr_sphs, bins=int_numBins, range=(float_minV, float_maxV),
+                        color="#508cf0", edgecolor="#323232", linewidth=1.0)
+            obj_ax.axvline(float_meanV, color="red", linewidth=2.0)
+            obj_ax.text(float_meanV, obj_ax.get_ylim()[1] * 0.96,
+                        f"Mean: {float_meanV:.3f}", color="red", fontsize=24,
+                        ha="left", va="top")
+            obj_ax.grid(axis="y", linestyle="--", alpha=0.25)
+        obj_fig.tight_layout()
+        obj_fig.savefig(path_outputImage, bbox_inches="tight")
+    finally:
+        plt.close(obj_fig)
+
+
+CONST_PREPROCESS_WIDTH: int = 2048
+CONST_PREPROCESS_HEIGHT: int = 1636
+CONST_PREPROCESS_BOTTOM_CROP: int = 100
 
 
 class Sam2AspectRatioService:
@@ -319,6 +379,13 @@ class Sam2AspectRatioService:
         if arr_image is None:
             raise FileNotFoundError(
                 f"이미지를 읽을 수 없습니다: {self.obj_config.path_input}")
+        int_final_h = CONST_PREPROCESS_HEIGHT - CONST_PREPROCESS_BOTTOM_CROP
+        if arr_image.shape[:2] != (int_final_h, CONST_PREPROCESS_WIDTH):
+            arr_image = cv2.resize(
+                arr_image, (CONST_PREPROCESS_WIDTH, CONST_PREPROCESS_HEIGHT),
+                interpolation=cv2.INTER_LINEAR,
+            )
+            arr_image = arr_image[:int_final_h, :]
         return arr_image
 
     def extract_inference_roi(
@@ -427,7 +494,7 @@ class Sam2AspectRatioService:
                 list_points = sample_interest_points(
                     arr_tileGray=arr_tileGray,
                     int_maxPoints=self.obj_config.int_pointsPerTile,
-                    int_minDistance=self.obj_config.int_pointMinDistance,
+                    int_minDist=self.obj_config.int_pointMinDistance,
                     float_qualityLevel=self.obj_config.float_pointQualityLevel,
                 )
                 list_promptBatches = list(iter_chunks(
@@ -455,7 +522,7 @@ class Sam2AspectRatioService:
 
             for list_pointChunk in list_promptBatches:
                 if self.obj_config.bool_usePointPrompts:
-                    if not list_pointChunk:
+                    if len(list_pointChunk) == 0:
                         continue
                     list_results = self.obj_model(  # type: ignore[misc]
                         source=arr_tileBgr,
@@ -764,27 +831,22 @@ class Sam2AspectRatioService:
             float_cx = float(int_x + int_w / 2.0)
             float_cy = float(int_y + int_h / 2.0)
 
-        # bbox가 실제 mask 외접 사각형이므로, 측정 span은 bbox 크기를 넘지 않도록 제한한다.
-        int_horizontal = min(
-            self.get_longest_span(arr_refinedMask, bool_horizontal=True),
-            int_w,
-        )
-        int_vertical = min(
-            self.get_longest_span(arr_refinedMask, bool_horizontal=False),
-            int_h,
-        )
-
         str_category = (
             "particle"
             if int_maskArea >= int(round(self.obj_config.float_particleAreaThreshold))
             else "fragment"
         )
 
-        float_aspectRatio = None
+        float_eqDiameterPx = 2.0 * math.sqrt(int_maskArea / math.pi)
+        float_eqDiameterUm = self.convert_pixels_to_micrometers(float_eqDiameterPx)
+
+        float_sphericity = None
         if str_category == "particle":
-            int_longAxis = max(int_horizontal, int_vertical, 1)
-            int_shortAxis = max(1, min(int_horizontal, int_vertical))
-            float_aspectRatio = float(int_shortAxis / int_longAxis)
+            float_perimeter = float(cv2.arcLength(arr_contour, closed=True))
+            if float_perimeter > 0.0:
+                float_sphericity = min(1.0, float(
+                    (4.0 * np.pi * int_maskArea) / (float_perimeter ** 2)
+                ))
 
         return ObjectMeasurement(
             int_index=int_index,
@@ -799,11 +861,8 @@ class Sam2AspectRatioService:
             float_bboxHeightUm=self.convert_pixels_to_micrometers(float(int_h)),
             float_centroidX=float_cx,
             float_centroidY=float_cy,
-            int_longestHorizontal=int_horizontal,
-            int_longestVertical=int_vertical,
-            float_longestHorizontalUm=self.convert_pixels_to_micrometers(float(int_horizontal)),
-            float_longestVerticalUm=self.convert_pixels_to_micrometers(float(int_vertical)),
-            float_aspectRatioWH=float_aspectRatio,
+            float_eqDiameterUm=float_eqDiameterUm,
+            float_sphericity=float_sphericity,
         )
 
     def create_overlay(
@@ -840,25 +899,21 @@ class Sam2AspectRatioService:
             tpl_color = (0, 255, 0) if obj_measurement.str_category == "particle" else (
                 0, 140, 255)
             cv2.drawContours(arr_overlay, [arr_contour], -1, tpl_color, 1)
-            cv2.rectangle(
-                arr_overlay,
-                (obj_measurement.int_bboxX, obj_measurement.int_bboxY),
-                (
-                    obj_measurement.int_bboxX + obj_measurement.int_bboxWidth,
-                    obj_measurement.int_bboxY + obj_measurement.int_bboxHeight,
-                ),
-                tpl_color,
-                1,
-            )
+
+            if obj_measurement.str_category == "particle":
+                int_eqRadius = int(round(math.sqrt(obj_measurement.int_maskArea / math.pi)))
+                cv2.circle(
+                    arr_overlay,
+                    (int(round(obj_measurement.float_centroidX)), int(round(obj_measurement.float_centroidY))),
+                    int_eqRadius,
+                    tpl_color,
+                    1,
+                )
 
             int_labelX = obj_measurement.int_bboxX
             int_labelY = max(14, obj_measurement.int_bboxY - 4)
-            if obj_measurement.str_category == "particle" and obj_measurement.float_aspectRatioWH is not None:
-                str_label = (
-                    f"P{obj_measurement.int_index} "
-                    f"A={obj_measurement.int_maskArea} "
-                    f"AR={obj_measurement.float_aspectRatioWH:.2f}"
-                )
+            if obj_measurement.str_category == "particle":
+                str_label = f"P{obj_measurement.int_index} A={obj_measurement.int_maskArea}"
             else:
                 str_label = f"F{obj_measurement.int_index} A={obj_measurement.int_maskArea}"
 
@@ -892,10 +947,14 @@ class Sam2AspectRatioService:
         int_totalObjects = len(list_objects)
         int_particleCount = len(list_particles)
         int_fragmentCount = len(list_fragments)
-        list_particleArs = [
-            obj_item.float_aspectRatioWH
+        list_particleSphs = [
+            obj_item.float_sphericity
             for obj_item in list_particles
-            if obj_item.float_aspectRatioWH is not None
+            if obj_item.float_sphericity is not None
+        ]
+        list_particleSizes = [
+            obj_item.float_eqDiameterUm
+            for obj_item in list_particles
         ]
         float_micrometersPerPixel = convert_pixels_to_micrometers(
             float_pixels=1.0,
@@ -940,24 +999,37 @@ class Sam2AspectRatioService:
             "normal_particle_count": int_particleCount,
             "fine_particle_count": int_fragmentCount,
             "fine_particle_ratio_percent": calculate_percentage(int_fragmentCount, int_totalObjects),
-            "particle_aspect_ratio_mean": None,
-            "particle_aspect_ratio_median": None,
-            "particle_aspect_ratio_std": None,
-            "particle_aspect_ratio_min": None,
-            "particle_aspect_ratio_max": None,
+            "particle_sphericity_mean": None,
+            "particle_sphericity_median": None,
+            "particle_sphericity_std": None,
+            "particle_sphericity_min": None,
+            "particle_sphericity_max": None,
+            "particle_mean_size_um": None,
+            "particle_size_median_um": None,
+            "particle_size_std_um": None,
+            "particle_size_min_um": None,
+            "particle_size_max_um": None,
         }
 
-        if list_particleArs:
-            arr_particleArs = np.array(list_particleArs, dtype=np.float32)
-            dict_summary.update(
-                {
-                    "particle_aspect_ratio_mean": float(np.mean(arr_particleArs)),
-                    "particle_aspect_ratio_median": float(np.median(arr_particleArs)),
-                    "particle_aspect_ratio_std": float(np.std(arr_particleArs)),
-                    "particle_aspect_ratio_min": float(np.min(arr_particleArs)),
-                    "particle_aspect_ratio_max": float(np.max(arr_particleArs)),
-                }
-            )
+        if list_particleSphs:
+            arr_sphs = np.array(list_particleSphs, dtype=np.float32)
+            dict_summary.update({
+                "particle_sphericity_mean": float(np.mean(arr_sphs)),
+                "particle_sphericity_median": float(np.median(arr_sphs)),
+                "particle_sphericity_std": float(np.std(arr_sphs)),
+                "particle_sphericity_min": float(np.min(arr_sphs)),
+                "particle_sphericity_max": float(np.max(arr_sphs)),
+            })
+
+        if list_particleSizes:
+            arr_sizes = np.array(list_particleSizes, dtype=np.float32)
+            dict_summary.update({
+                "particle_mean_size_um": float(np.mean(arr_sizes)),
+                "particle_size_median_um": float(np.median(arr_sizes)),
+                "particle_size_std_um": float(np.std(arr_sizes)),
+                "particle_size_min_um": float(np.min(arr_sizes)),
+                "particle_size_max_um": float(np.max(arr_sizes)),
+            })
 
         return dict_summary
 
@@ -1034,6 +1106,12 @@ class Sam2AspectRatioService:
         save_particle_distribution_histogram(
             path_particlesCsv=path_csvParticle,
             path_outputImage=self.obj_config.path_outputDir / "particle_dist.png",
+            path_inputImage=self.obj_config.path_input,
+        )
+
+        save_sphericity_distribution_histogram(
+            path_particlesCsv=path_csvParticle,
+            path_outputImage=self.obj_config.path_outputDir / "sphericity_dist.png",
             path_inputImage=self.obj_config.path_input,
         )
 

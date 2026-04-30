@@ -7,8 +7,10 @@ import sys
 import time
 
 from services.primary_particle import run_primary_particle_analysis, build_primary_arg_parser
-from configs import get_analysis_preset
+from configs import get_analysis_preset, load_paths_config
 from utils.metrics import json_default
+
+_DEFAULT_PATHS_CONFIG = "configs/paths.yaml"
 
 
 def main() -> None:
@@ -17,16 +19,41 @@ def main() -> None:
         import io
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-    # 1차 파싱: --particle_type / --magnification 만 먼저 읽어 preset 결정
+    # 1차 파싱: --config / --particle_type / --magnification 만 먼저 읽는다.
+    # add_help=False 이므로 미등록 인자는 무시된다.
     obj_preParser = argparse.ArgumentParser(add_help=False)
+    obj_preParser.add_argument("--config", default=_DEFAULT_PATHS_CONFIG)
     obj_preParser.add_argument("--particle_type", default=None)
     obj_preParser.add_argument("--magnification", default=None)
     obj_preArgs, _ = obj_preParser.parse_known_args()
 
     # 메인 파서 구성
     obj_parser = build_primary_arg_parser()
+    obj_parser.add_argument(
+        "--config",
+        default=_DEFAULT_PATHS_CONFIG,
+        metavar="FILE",
+        help=(
+            f"경로 설정 YAML 파일 (기본값: {_DEFAULT_PATHS_CONFIG}). "
+            "input / output_dir / model / model_cfg / device 를 지정할 수 있다. "
+            "CLI 인자가 항상 최우선이므로 언제든 덮어쓸 수 있다."
+        ),
+    )
 
-    # preset 적용: set_defaults 는 CLI에서 명시적으로 지정한 값에는 영향 없음
+    # 우선순위 (낮 → 높):
+    #   parser default → paths config → preset → CLI 인자
+
+    # 1) paths config 적용
+    dict_paths = load_paths_config(obj_preArgs.config)
+    if dict_paths:
+        obj_parser.set_defaults(**dict_paths)
+        print(
+            f"[config] {obj_preArgs.config} 에서 경로 설정 로드 "
+            f"({', '.join(dict_paths.keys())})",
+            flush=True,
+        )
+
+    # 2) preset 적용 (paths config 보다 우선)
     if obj_preArgs.particle_type is not None:
         str_mag = obj_preArgs.magnification or "50k"
         dict_preset = get_analysis_preset(obj_preArgs.particle_type, str_mag)
@@ -44,7 +71,7 @@ def main() -> None:
                 flush=True,
             )
 
-    # 2차 파싱: preset 이 기본값으로 설정된 상태에서 모든 인자 파싱
+    # 3) 전체 파싱: CLI 인자가 최우선
     obj_args = obj_parser.parse_args()
     float_start = time.perf_counter()
 
@@ -90,6 +117,8 @@ def main() -> None:
         bool_autoDetectSphere=obj_args.auto_detect_sphere,
         float_sphereCapFraction=obj_args.sphere_cap_fraction,
         str_measureMode=obj_args.measure_mode,
+        bool_lsdAdaptiveThresh=obj_args.lsd_adaptive_thresh,
+        bool_lsdFuseSegments=obj_args.lsd_fuse_segments,
     )
 
     print("===== 1차 입자 분석 결과 요약 =====")

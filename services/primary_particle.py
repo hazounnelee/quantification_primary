@@ -21,7 +21,7 @@ from core.schema import (
 )
 from configs import get_analysis_preset
 from utils.metrics import convert_pixels_to_micrometers, calculate_mean_from_optional_values, calculate_percentage, json_default
-from utils.image import detect_sphere_roi, compute_center_roi
+from utils.image import detect_sphere_roi, compute_center_roi, compute_adaptive_block_size
 from utils.lsd import detect_acicular_lsd
 from utils.io import collect_input_groups, build_image_output_dir
 from services.sam2_service import Sam2AspectRatioService
@@ -65,8 +65,8 @@ CONST_ACICULAR_BOX_PROMPT_BATCH: int = 16
 CONST_ACICULAR_FALLBACK_THRESHOLD: int = 3
 
 # Sam2AspectRatioConfig 기본값에서 가져온 공통 상수
-CONST_SCALE_PIXELS: float = 276.0
-CONST_SCALE_MICROMETERS: float = 50.0
+CONST_SCALE_PIXELS: float = 147.0
+CONST_SCALE_MICROMETERS: float = 1.0
 CONST_BBOX_EDGE_MARGIN: int = 8
 CONST_TILE_EDGE_MARGIN: int = 8
 CONST_ROI_X_MIN: int = 0
@@ -328,15 +328,11 @@ class PrimaryParticleService(Sam2AspectRatioService):
         arr_eq = obj_clahe.apply(arr_roiGray)
         arr_blur = cv2.GaussianBlur(arr_eq, (3, 3), 0)
 
-        # 2. Adaptive threshold — ROI 크기에 맞게 block size 자동 조정
-        int_bsAuto = max(11, min(CONST_ACICULAR_ADAPT_BLOCK_SIZE,
-                                  int(min(int_roiH, int_roiW) / 25)))
-        int_bs = int_bsAuto if int_bsAuto % 2 == 1 else int_bsAuto + 1
         arr_thresh = cv2.adaptiveThreshold(
             arr_blur, 255,
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv2.THRESH_BINARY,
-            int_bs,
+            compute_adaptive_block_size(int_roiH, int_roiW, 25, CONST_ACICULAR_ADAPT_BLOCK_SIZE),
             CONST_ACICULAR_ADAPT_C,
         )
         if float(arr_thresh.sum()) / (255.0 * int_roiH * int_roiW) > 0.55:
@@ -1031,7 +1027,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
         # ── LSD 직접 측정 모드 (SAM2 불필요) ────────────────────
         if self.obj_primary_config.str_measureMode == "lsd":
             arr_roiGray = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
-            list_objects, list_validMasks, arr_opencvDebugMask, dict_lsdSteps = detect_acicular_lsd(
+            list_objects, list_validMasks, arr_opencvDebugMask, dict_lsdSteps, float_roiDensity = detect_acicular_lsd(
                 arr_roiGray,
                 arr_inputRoiBgr,
                 float_acicular_threshold=self.obj_primary_config.float_acicularThreshold,
@@ -1040,6 +1036,8 @@ class PrimaryParticleService(Sam2AspectRatioService):
                 float_scale_um=self.obj_config.float_scaleMicrometers,
                 int_edge_margin=self.obj_config.int_bboxEdgeMargin,
                 float_area_threshold=self.obj_config.float_particleAreaThreshold,
+                bool_adaptive_thresh=self.obj_primary_config.bool_lsdAdaptiveThresh,
+                bool_fuse_segments=self.obj_primary_config.bool_lsdFuseSegments,
             )
 
             int_primaryCount = sum(
@@ -1056,6 +1054,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
             dict_summary["roi"] = dict_roi
             dict_summary["measure_mode"] = "lsd"
             dict_summary["particle_mode"] = self.obj_primary_config.str_particleMode
+            dict_summary["roi_density"] = round(float_roiDensity, 4)
 
             self.save_primary_outputs(
                 arr_inputBgr, arr_inputRoiBgr, arr_overlay,
@@ -1106,9 +1105,12 @@ class PrimaryParticleService(Sam2AspectRatioService):
 
         arr_overlay = self.create_primary_overlay(arr_inputRoiBgr, list_objects, list_validMasks)
         dict_summary = self.build_primary_summary(list_objects)
+        arr_roiGray = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
+        _, arr_roiBinary = cv2.threshold(arr_roiGray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         dict_summary["roi"] = dict_roi
         dict_summary["measure_mode"] = "sam2"
         dict_summary["particle_mode"] = self.obj_primary_config.str_particleMode
+        dict_summary["roi_density"] = round(float((arr_roiBinary > 0).sum()) / arr_roiBinary.size, 4)
         dict_summary["num_tiles"] = dict_debug.get("num_tiles")
         dict_summary["num_candidate_points"] = dict_debug.get("num_candidate_points")
         dict_summary["num_accepted_masks"] = dict_debug.get("num_accepted_masks")
@@ -1180,6 +1182,8 @@ class PrimaryParticleService(Sam2AspectRatioService):
         str_particleType: str,
         str_magnification: str,
         str_measureMode: str,
+        bool_lsdAdaptiveThresh: bool,
+        bool_lsdFuseSegments: bool,
     ) -> PrimaryParticleConfig:
         return PrimaryParticleConfig(
             path_input=path_image,
@@ -1225,6 +1229,8 @@ class PrimaryParticleService(Sam2AspectRatioService):
             str_particleType=str_particleType,
             str_magnification=str_magnification,
             str_measureMode=str_measureMode,
+            bool_lsdAdaptiveThresh=bool_lsdAdaptiveThresh,
+            bool_lsdFuseSegments=bool_lsdFuseSegments,
         )
 
 
@@ -1268,6 +1274,8 @@ def build_primary_img_id_summary(
         "plate_long_axis_um_mean": _mean_stat("plate_long_axis_um", "mean"),
         "plate_aspect_ratio_mean": _mean_stat("plate_aspect_ratio", "mean"),
         "all_primary_thickness_um_mean": _mean_stat("all_primary_thickness_um", "mean"),
+        "roi_density_mean": calculate_mean_from_optional_values(
+            d.get("roi_density") for d in list_fileSummaries),
         "files": list_fileSummaries,
     }
 
@@ -1298,6 +1306,8 @@ def build_primary_batch_summary(
             d.get("plate_thickness_um_mean") for d in list_groupSummaries),
         "all_primary_thickness_um_mean": calculate_mean_from_optional_values(
             d.get("all_primary_thickness_um_mean") for d in list_groupSummaries),
+        "roi_density_mean": calculate_mean_from_optional_values(
+            d.get("roi_density_mean") for d in list_groupSummaries),
         "img_ids": list_groupSummaries,
     }
 
@@ -1356,6 +1366,8 @@ def run_primary_particle_analysis(
     str_particleType: str = "unknown",
     str_magnification: str = "unknown",
     str_measureMode: str = "sam2",
+    bool_lsdAdaptiveThresh: bool = False,
+    bool_lsdFuseSegments: bool = False,
 ) -> tp.Dict[str, tp.Any]:
     """외부에서 호출 가능한 최상위 실행 함수.
 
@@ -1422,6 +1434,8 @@ def run_primary_particle_analysis(
             str_particleType=str_particleType,
             str_magnification=str_magnification,
             str_measureMode=str_measureMode,
+            bool_lsdAdaptiveThresh=bool_lsdAdaptiveThresh,
+            bool_lsdFuseSegments=bool_lsdFuseSegments,
         )
 
     # 단일 이미지
@@ -1564,11 +1578,10 @@ def build_primary_arg_parser() -> argparse.ArgumentParser:
     # 스케일 (SEM 이미지 배율에 맞게 설정 필요)
     obj_parser.add_argument(
         "--scale_pixels", type=float, default=CONST_SCALE_PIXELS,
-        help="스케일 기준 pixel 수. 예: 276 (기본 = 276 px = 50 µm)")
+        help="스케일 기준 pixel 수. 20k=147, 50k=371")
     obj_parser.add_argument(
         "--scale_um", type=float, default=CONST_SCALE_MICROMETERS,
-        help="스케일 기준 µm 값. 예: 50 (기본 = 276 px = 50 µm). "
-             "소입자 스케일 예시: --scale_pixels 184 --scale_um 10")
+        help="스케일 기준 µm 값. 20k=1, 50k=1 (기본 단위: 1 µm)")
 
     # SAM2 추론
     obj_parser.add_argument(
@@ -1679,6 +1692,24 @@ def build_primary_arg_parser() -> argparse.ArgumentParser:
         help=(
             "구형 2차 입자 검출 시 ROI로 사용할 cap 높이 비율 (0.1~1.0). "
             f"기본값 {CONST_SPHERE_CAP_FRACTION}: 구 지름의 상단 {int(CONST_SPHERE_CAP_FRACTION*100)}%% 영역."
+        ),
+    )
+
+    # LSD 전처리 / 후처리 옵션
+    obj_parser.add_argument(
+        "--lsd_adaptive_thresh",
+        action=argparse.BooleanOptionalAction, default=False,
+        help=(
+            "LSD 전처리에서 전역 Otsu 대신 지역 Adaptive(Gaussian) threshold를 사용한다. "
+            "명암 불균일 이미지에서 엣지 검출 품질을 높인다."
+        ),
+    )
+    obj_parser.add_argument(
+        "--lsd_fuse_segments",
+        action=argparse.BooleanOptionalAction, default=False,
+        help=(
+            "유사 방향(≤10°)이고 겹치거나 인접한 LSD 선분을 하나로 융합한다. "
+            "단일 침상이 여러 조각으로 검출될 때 장축 길이를 올바르게 측정한다."
         ),
     )
 

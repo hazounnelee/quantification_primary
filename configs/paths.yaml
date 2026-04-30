@@ -1,0 +1,18 @@
+# Default paths for primary_measure.py
+# All fields are optional — leave blank ("") to fall back to the CLI default.
+# CLI arguments always take the highest priority and override these values.
+
+# Input image or directory
+input: ""
+
+# Output directory (empty = auto-generated timestamp name)
+output_dir: ""
+
+# SAM2 model weights file
+model: "model/sam2.1_hiera_base_plus.pt"
+
+# SAM2 model config YAML
+model_cfg: "model/sam2.1_hiera_t.yaml"
+
+# Inference device: cpu, cuda:0, mps, etc.  (empty = auto-detect)
+device: ""

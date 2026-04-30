@@ -4,6 +4,19 @@ import cv2
 import numpy as np
 
 
+def compute_adaptive_block_size(
+    int_h: int,
+    int_w: int,
+    int_divisor: int,
+    int_max: int = 0,
+) -> int:
+    """Return an odd block size for cv2.adaptiveThreshold scaled to image dimensions."""
+    int_bs = max(11, int(min(int_h, int_w) / int_divisor))
+    if int_max > 0:
+        int_bs = min(int_bs, int_max)
+    return int_bs if int_bs % 2 == 1 else int_bs + 1
+
+
 def create_processing_tiles(
     int_x1: int,
     int_y1: int,

@@ -33,9 +33,9 @@ class Sam2AspectRatioConfig:
     float_bboxDedupIou: float = 0.85
     bool_usePointPrompts: bool = True
     bool_smallParticle: bool = False
-    float_scalePixels: float = 276.0
-    float_scaleMicrometers: float = 50.0
-    str_device: str = "cpu"
+    float_scalePixels: float = 147.0
+    float_scaleMicrometers: float = 1.0
+    str_device: tp.Optional[str] = None
     bool_retinaMasks: bool = True
     bool_saveIndividualMasks: bool = True
 
@@ -54,11 +54,8 @@ class ObjectMeasurement:
     float_bboxHeightUm: float
     float_centroidX: float
     float_centroidY: float
-    int_longestHorizontal: int
-    int_longestVertical: int
-    float_longestHorizontalUm: float
-    float_longestVerticalUm: float
-    float_aspectRatioWH: float
+    float_eqDiameterUm: float
+    float_sphericity: tp.Optional[float]
 
 
 @dataclass
@@ -79,6 +76,8 @@ class PrimaryParticleConfig(Sam2AspectRatioConfig):
     str_particleType: str = "unknown"
     str_magnification: str = "unknown"
     str_measureMode: str = "sam2"
+    bool_lsdAdaptiveThresh: bool = False
+    bool_lsdFuseSegments: bool = False
 
 
 @dataclass
