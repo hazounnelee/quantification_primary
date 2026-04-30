@@ -172,23 +172,16 @@ def draw_primary():
 
     y -= 1.45
     box(ax, LX, y, CW, CH,
-        "LSD DETECTION\n"
-        "cv2.createLineSegmentDetector(0).detect(blur)\n"
-        "output: N × (x1, y1, x2, y2) + per-segment width",
+        "CONTOUR EXTRACTION\n"
+        "cv2.findContours(binary)  →  minAreaRect per contour\n"
+        "→ long axis, short axis, angle, center  (= oriented bbox segment)",
         color=C_LSD, fs=7.5); larr(y - 0.48, y - 1.0)
 
     y -= 1.3
     box(ax, LX, y, CW, CH,
-        "SEGMENT FILTER\n"
-        "length  ≥  20 px\n"
-        "--ar_screen OFF (default)  →  AR filter skipped  (all segments pass)",
-        color=C_LSD, fs=7.5); larr(y - 0.48, y - 1.0)
-
-    y -= 1.3
-    box(ax, LX, y, CW, CH,
-        "DEDUPLICATION  (greedy, longest-first)\n"
-        "reject if:  dist(centre_i, centre_j) < 12 px\n"
-        "           AND  |angle_i − angle_j|  < 25°",
+        "LENGTH FILTER\n"
+        "long_axis  ≥  20 px\n"
+        "--ar_screen OFF (default)  →  AR filter skipped  (all contours pass)",
         color=C_LSD, fs=7.5); larr(y - 0.48, y - 1.0)
 
     y -= 1.3

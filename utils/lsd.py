@@ -8,8 +8,6 @@ from utils.metrics import convert_pixels_to_micrometers
 from utils.image import compute_adaptive_block_size
 
 CONST_LSD_MIN_LENGTH_PX: int = 20
-CONST_LSD_DEDUP_DIST_PX: int = 12
-CONST_LSD_DEDUP_ANGLE_DEG: float = 25.0
 CONST_LSD_PERP_N_SAMPLES: int = 7
 
 CONST_LSD_FUSE_ANGLE_DEG: float = 10.0
@@ -254,25 +252,32 @@ def detect_acicular_lsd(
     tp.Dict[str, np.ndarray],
     float,
 ]:
-    """Detect acicular particles with LSD and measure thickness via perpendicular profile.
+    """Detect acicular particles from binary contours and measure thickness.
+
+    Flow:
+      1. CLAHE + GaussianBlur
+      2. Binarize (Otsu or Adaptive) → density
+      3. findContours → minAreaRect per contour → candidate segments
+      4. Length filter (≥ CONST_LSD_MIN_LENGTH_PX)
+      5. Optional contour-box fusion (bool_fuse_segments):
+         Δangle < 10°  AND  intersection / min(area_i, area_j) ≥ 0.3
+      6. Perpendicular thickness measurement per segment
 
     Args:
         arr_roi_gray: Grayscale ROI image.
         arr_roi_bgr: BGR ROI image (for debug visualization).
-        float_acicular_threshold: AR < this -> acicular.
+        float_acicular_threshold: AR < this → acicular.
         str_particle_type: "acicular" or "plate" (wrong-shape candidates are dropped).
         float_scale_pixels: Scale bar length in pixels.
         float_scale_um: Scale bar length in micrometers.
         int_edge_margin: Pixels from ROI edge to discard.
         float_area_threshold: Minimum mask area in pixels²; smaller masks are dropped.
-        bool_adaptive_thresh: Use adaptive (Gaussian) threshold instead of Otsu for
-            both the step-2 visualization and the perpendicular profile scan.
-        bool_fuse_segments: Fuse oriented bounding boxes that have similar direction
-            (Δangle < 10°) and significant overlap (intersection/min_area ≥ 0.3).
-            Produces an extra lsd_06_after_fusion debug image.
+        bool_adaptive_thresh: Use adaptive (Gaussian) threshold instead of Otsu.
+        bool_fuse_segments: Fuse contour bboxes with similar direction and significant
+            overlap before thickness measurement.
 
     Returns:
-        (list_measurements, list_masks, arr_debug_bgr, dict_step_images)
+        (list_measurements, list_masks, arr_debug_bgr, dict_step_images, float_density)
     """
     int_roiH, int_roiW = arr_roi_gray.shape[:2]
     float_px_per_um = float_scale_pixels / max(float_scale_um, 1e-9)
@@ -281,7 +286,7 @@ def detect_acicular_lsd(
     arr_eq = obj_clahe.apply(arr_roi_gray)
     arr_blur = cv2.GaussianBlur(arr_eq, (3, 3), 0)
 
-    # --- thresholding ---
+    # --- step 1: thresholding ---
     if bool_adaptive_thresh:
         arr_thresh_binary = cv2.adaptiveThreshold(
             arr_blur, 255,
@@ -298,12 +303,7 @@ def detect_acicular_lsd(
         arr_binary_for_profile = None
         str_thresh_key = "lsd_02_otsu_thresh"
 
-    # Density: fraction of bright (white) pixels in the binary image.
-    # More black area (background) → lower density.
     float_density = float((arr_thresh_binary > 0).sum()) / (int_roiH * int_roiW)
-
-    obj_lsd = cv2.createLineSegmentDetector(0)
-    arr_lines, arr_widths, _, _ = obj_lsd.detect(arr_blur)
 
     dict_steps: tp.Dict[str, np.ndarray] = {
         "lsd_01_preprocessed": cv2.cvtColor(arr_blur, cv2.COLOR_GRAY2BGR),
@@ -313,36 +313,45 @@ def detect_acicular_lsd(
     list_objects: tp.List[PrimaryParticleMeasurement] = []
     list_masks: tp.List[np.ndarray] = []
 
-    if arr_lines is None:
-        dict_steps["lsd_03_raw_detections"] = arr_roi_bgr.copy()
-        dict_steps["lsd_04_after_filter"] = arr_roi_bgr.copy()
-        dict_steps["lsd_05_after_dedup"] = arr_roi_bgr.copy()
-        return list_objects, list_masks, arr_roi_bgr.copy(), dict_steps, float_density
+    # --- step 2: contours from binary image ---
+    list_contours, _ = cv2.findContours(
+        arr_thresh_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    # step 3: raw LSD detections (yellow)
+    # step 3: raw contour bboxes (yellow)
     arr_step_raw = arr_roi_bgr.copy()
-    for arr_line in arr_lines:
-        fx1, fy1, fx2, fy2 = arr_line[0]
-        cv2.line(arr_step_raw, (int(fx1), int(fy1)), (int(fx2), int(fy2)), (0, 255, 255), 1)
+    for cnt in list_contours:
+        rect_pts = cv2.boxPoints(cv2.minAreaRect(cnt)).astype(np.int32)
+        cv2.polylines(arr_step_raw, [rect_pts.reshape(-1, 1, 2)], True, (0, 255, 255), 1)
     dict_steps["lsd_03_raw_detections"] = arr_step_raw
 
-    float_ar_loose = min(float_acicular_threshold + 0.20, 0.65)
+    # --- step 3: build candidates from minAreaRect ---
     list_cands: tp.List[tp.Dict[str, float]] = []
-    for int_i, arr_line in enumerate(arr_lines):
-        float_x1, float_y1, float_x2, float_y2 = arr_line[0]
-        float_len = float(np.sqrt((float_x2 - float_x1) ** 2 + (float_y2 - float_y1) ** 2))
-        if float_len < CONST_LSD_MIN_LENGTH_PX:
+    for cnt in list_contours:
+        rect = cv2.minAreaRect(cnt)
+        (float_cx, float_cy), (float_rw, float_rh), _ = rect
+        float_long = max(float_rw, float_rh)
+        float_short = min(float_rw, float_rh)
+        if float_long < CONST_LSD_MIN_LENGTH_PX:
             continue
-        float_lsd_w = float(arr_widths[int_i][0]) if arr_widths is not None else 5.0
-        if float_len > 0 and float_lsd_w / float_len >= float_ar_loose:
-            continue
-        float_angle = float(np.degrees(np.arctan2(float_y2 - float_y1, float_x2 - float_x1)) % 180)
+        # Derive angle of long axis from boxPoints (avoids OpenCV angle conventions)
+        arr_corners = cv2.boxPoints(rect)
+        float_d01 = float(np.linalg.norm(arr_corners[1] - arr_corners[0]))
+        float_d12 = float(np.linalg.norm(arr_corners[2] - arr_corners[1]))
+        arr_vec = arr_corners[1] - arr_corners[0] if float_d01 >= float_d12 else arr_corners[2] - arr_corners[1]
+        float_angle = float(np.degrees(np.arctan2(float(arr_vec[1]), float(arr_vec[0]))) % 180)
+        float_ux = float(np.cos(np.radians(float_angle)))
+        float_uy = float(np.sin(np.radians(float_angle)))
         list_cands.append({
-            "x1": float_x1, "y1": float_y1, "x2": float_x2, "y2": float_y2,
-            "length": float_len, "angle": float_angle, "width": float_lsd_w,
+            "x1": float_cx - (float_long / 2.0) * float_ux,
+            "y1": float_cy - (float_long / 2.0) * float_uy,
+            "x2": float_cx + (float_long / 2.0) * float_ux,
+            "y2": float_cy + (float_long / 2.0) * float_uy,
+            "length": float_long,
+            "angle": float_angle,
+            "width": float_short,
         })
 
-    # step 4: after length/AR filter (cyan)
+    # step 4: after length filter (cyan)
     arr_step_filtered = arr_roi_bgr.copy()
     for dict_c in list_cands:
         cv2.line(arr_step_filtered,
@@ -350,35 +359,11 @@ def detect_acicular_lsd(
                  (int(dict_c["x2"]), int(dict_c["y2"])),
                  (255, 255, 0), 1)
     dict_steps["lsd_04_after_filter"] = arr_step_filtered
+    dict_steps["lsd_05_after_dedup"] = arr_step_filtered  # no dedup step; keep key for compatibility
 
-    list_cands.sort(key=lambda d: d["length"], reverse=True)
-    list_accepted: tp.List[tp.Dict[str, float]] = []
-    for dict_c in list_cands:
-        float_cx = (dict_c["x1"] + dict_c["x2"]) / 2.0
-        float_cy = (dict_c["y1"] + dict_c["y2"]) / 2.0
-        bool_dup = False
-        for dict_p in list_accepted:
-            float_pcx = (dict_p["x1"] + dict_p["x2"]) / 2.0
-            float_pcy = (dict_p["y1"] + dict_p["y2"]) / 2.0
-            float_dist = float(np.sqrt((float_cx - float_pcx) ** 2 + (float_cy - float_pcy) ** 2))
-            float_adiff = abs(dict_c["angle"] - dict_p["angle"])
-            float_adiff = min(float_adiff, 180.0 - float_adiff)
-            if float_dist < CONST_LSD_DEDUP_DIST_PX and float_adiff < CONST_LSD_DEDUP_ANGLE_DEG:
-                bool_dup = True
-                break
-        if not bool_dup:
-            list_accepted.append(dict_c)
+    list_accepted = list_cands
 
-    # step 5: after deduplication (orange)
-    arr_step_deduped = arr_roi_bgr.copy()
-    for dict_c in list_accepted:
-        cv2.line(arr_step_deduped,
-                 (int(dict_c["x1"]), int(dict_c["y1"])),
-                 (int(dict_c["x2"]), int(dict_c["y2"])),
-                 (0, 165, 255), 1)
-    dict_steps["lsd_05_after_dedup"] = arr_step_deduped
-
-    # --- optional contour box fusion ---
+    # --- step 4 (optional): contour box fusion ---
     int_before_fuse = len(list_accepted)
     if bool_fuse_segments and list_accepted:
         list_accepted = _fuse_contour_boxes(
@@ -397,8 +382,7 @@ def detect_acicular_lsd(
         dict_steps["lsd_06_after_fusion"] = arr_step_fused
 
     print(
-        f"[LSD] 원본 {len(arr_lines)}개 → 필터 {len(list_cands)}개 "
-        f"→ 중복제거 {int_before_fuse}개"
+        f"[Contour] 원본 {len(list_contours)}개 → 필터 {len(list_cands)}개"
         + (f" → 융합 {len(list_accepted)}개" if bool_fuse_segments else ""),
         flush=True,
     )
@@ -492,5 +476,5 @@ def detect_acicular_lsd(
                  (int(float_nx1), int(float_ny1)), (int(float_nx2), int(float_ny2)),
                  (0, 255, 0) if str_category == "acicular" else (0, 128, 255), 1)
 
-    print(f"[LSD] → 최종 {len(list_objects)}개  density={float_density:.3f}", flush=True)
+    print(f"[Contour] → 최종 {len(list_objects)}개  density={float_density:.3f}", flush=True)
     return list_objects, list_masks, arr_debug, dict_steps, float_density
