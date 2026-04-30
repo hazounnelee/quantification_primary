@@ -193,10 +193,10 @@ def draw_primary():
 
     y -= 1.3
     box(ax, LX, y, CW, 1.05,
-        "SEGMENT FUSION  (--lsd_fuse_segments, ON by default)\n"
-        "union-find over collinear neighbours:\n"
-        "  Δangle < 10°  ·  perp-dist < 8 px  ·  axial gap < 15 px\n"
-        "merge: length-weighted axis + extreme endpoint projection",
+        "CONTOUR FUSION  (--lsd_fuse_segments, ON by default)\n"
+        "union-find over oriented bounding boxes (connected components):\n"
+        "  similar direction  (Δangle < 10°)  AND  significant bbox overlap\n"
+        "→ merge similarly-directed, heavily-overlapping contours into one",
         color=C_LSD, fs=7.2, alpha=0.88); larr(y - 0.53, y - 1.18)
 
     y -= 1.48
