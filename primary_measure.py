@@ -120,6 +120,7 @@ def main() -> None:
         bool_lsdAdaptiveThresh=obj_args.lsd_adaptive_thresh,
         bool_lsdFuseSegments=obj_args.lsd_fuse_segments,
         bool_arScreen=obj_args.ar_screen,
+        int_lsdMinLengthPx=obj_args.min_length,
     )
 
     print("===== 1차 입자 분석 결과 요약 =====")

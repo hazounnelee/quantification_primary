@@ -1055,7 +1055,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
                 int_edge_margin=self.obj_config.int_bboxEdgeMargin,
                 float_area_threshold=self.obj_config.float_particleAreaThreshold,
                 bool_adaptive_thresh=self.obj_primary_config.bool_lsdAdaptiveThresh,
-                bool_fuse_segments=self.obj_primary_config.bool_lsdFuseSegments,
+                int_min_length_px=self.obj_primary_config.int_lsdMinLengthPx,
             )
 
             int_primaryCount = sum(
@@ -1203,6 +1203,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
         bool_lsdAdaptiveThresh: bool,
         bool_lsdFuseSegments: bool,
         bool_arScreen: bool,
+        int_lsdMinLengthPx: int,
     ) -> PrimaryParticleConfig:
         return PrimaryParticleConfig(
             path_input=path_image,
@@ -1251,6 +1252,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
             bool_lsdAdaptiveThresh=bool_lsdAdaptiveThresh,
             bool_lsdFuseSegments=bool_lsdFuseSegments,
             bool_arScreen=bool_arScreen,
+            int_lsdMinLengthPx=int_lsdMinLengthPx,
         )
 
 
@@ -1389,6 +1391,7 @@ def run_primary_particle_analysis(
     bool_lsdAdaptiveThresh: bool = False,
     bool_lsdFuseSegments: bool = True,
     bool_arScreen: bool = False,
+    int_lsdMinLengthPx: int = 20,
 ) -> tp.Dict[str, tp.Any]:
     """외부에서 호출 가능한 최상위 실행 함수.
 
@@ -1458,6 +1461,7 @@ def run_primary_particle_analysis(
             bool_lsdAdaptiveThresh=bool_lsdAdaptiveThresh,
             bool_lsdFuseSegments=bool_lsdFuseSegments,
             bool_arScreen=bool_arScreen,
+            int_lsdMinLengthPx=int_lsdMinLengthPx,
         )
 
     # 단일 이미지
@@ -1718,6 +1722,10 @@ def build_primary_arg_parser() -> argparse.ArgumentParser:
     )
 
     # LSD 전처리 / 후처리 옵션
+    obj_parser.add_argument(
+        "--min_length", type=int, default=20,
+        help="LSD 선분 최소 길이 (px). 이 값보다 짧은 선분은 무시된다. 기본값: 20.",
+    )
     obj_parser.add_argument(
         "--lsd_adaptive_thresh",
         action=argparse.BooleanOptionalAction, default=False,
