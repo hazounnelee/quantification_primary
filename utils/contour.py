@@ -7,8 +7,8 @@ import numpy as np
 from core.schema import PrimaryParticleMeasurement
 from utils.metrics import convert_pixels_to_micrometers
 
-CONST_FUSE_ANGLE_DEG: float = 10.0
-CONST_FUSE_OVERLAP_RATIO: float = 0.4
+CONST_FUSE_ANGLE_DEG: float = 15.0
+CONST_FUSE_OVERLAP_RATIO: float = 0.7
 
 
 def fuse_contours(
