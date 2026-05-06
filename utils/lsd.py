@@ -245,7 +245,10 @@ def detect_acicular_lsd(
 
     arr_debug = arr_roi_bgr.copy()
 
-    for int_idx, dict_c in enumerate(list_accepted):
+    def _process_segment(
+        int_idx: int,
+        dict_c: tp.Dict[str, float],
+    ) -> tp.Optional[tp.Tuple[PrimaryParticleMeasurement, np.ndarray]]:
         float_x1 = dict_c["x1"]
         float_y1 = dict_c["y1"]
         float_x2 = dict_c["x2"]
@@ -259,14 +262,12 @@ def detect_acicular_lsd(
             arr_binary=arr_binary_for_profile,
         )
         if float_thickness < 2.0:
-            continue
+            return None
 
         float_ar = float_thickness / float_len
-
         str_category = "acicular" if float_ar < float_acicular_threshold else "plate"
-
         if str_particle_type in ("acicular", "plate") and str_category != str_particle_type:
-            continue
+            return None
 
         float_ux = (float_x2 - float_x1) / max(float_len, 1.0)
         float_uy = (float_y2 - float_y1) / max(float_len, 1.0)
@@ -293,18 +294,18 @@ def detect_acicular_lsd(
         int_bh = min(int_bh, int_roiH - int_by)
 
         if _is_bbox_near_edge(int_bx, int_by, int_bw, int_bh, int_roiW, int_roiH, int_edge_margin):
-            continue
+            return None
 
         arr_mask = np.zeros((int_roiH, int_roiW), dtype=np.uint8)
         cv2.fillPoly(arr_mask, [arr_corners.astype(np.int32).reshape(-1, 1, 2)], 1)
 
         if float_area_threshold > 0.0 and float(arr_mask.sum()) < float_area_threshold:
-            continue
+            return None
 
         float_mcx = (float_nx1 + float_nx2) / 2.0
         float_mcy = (float_ny1 + float_ny2) / 2.0
 
-        list_objects.append(PrimaryParticleMeasurement(
+        return (PrimaryParticleMeasurement(
             int_index=int_idx,
             str_category=str_category,
             int_maskArea=int(arr_mask.sum()),
@@ -325,12 +326,21 @@ def detect_acicular_lsd(
             int_longestVertical=int_bh,
             float_longestHorizontalUm=convert_pixels_to_micrometers(float(int_bw), float_scale_pixels, float_scale_um),
             float_longestVerticalUm=convert_pixels_to_micrometers(float(int_bh), float_scale_pixels, float_scale_um),
-        ))
-        list_masks.append(arr_mask)
+        ), arr_mask)
 
+    list_raw = [_process_segment(int_idx, dict_c)
+                for int_idx, dict_c in enumerate(list_accepted)]
+
+    for tpl_result in list_raw:
+        if tpl_result is None:
+            continue
+        obj_m, arr_mask = tpl_result
+        list_objects.append(obj_m)
+        list_masks.append(arr_mask)
         cv2.line(arr_debug,
-                 (int(float_nx1), int(float_ny1)), (int(float_nx2), int(float_ny2)),
-                 (0, 255, 0) if str_category == "acicular" else (0, 128, 255), 1)
+                 (obj_m.int_bboxX, obj_m.int_bboxY),
+                 (obj_m.int_bboxX + obj_m.int_bboxWidth, obj_m.int_bboxY + obj_m.int_bboxHeight),
+                 (0, 255, 0) if obj_m.str_category == "acicular" else (0, 128, 255), 1)
 
     print(f"[LSD] → 최종 {len(list_objects)}개  density={float_density:.3f}", flush=True)
     return list_objects, list_masks, arr_debug, dict_steps, float_density
