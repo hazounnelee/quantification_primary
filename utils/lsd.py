@@ -57,20 +57,16 @@ def measure_perpendicular_thickness(
             arr_above = arr_profile > float_thresh
         if not arr_above.any():
             continue
-        list_regions: tp.List[tp.Tuple[int, int]] = []
-        bool_in = False
-        int_start = 0
-        for int_k, bool_v in enumerate(arr_above.tolist()):
-            if bool_v and not bool_in:
-                bool_in = True
-                int_start = int_k
-            elif not bool_v and bool_in:
-                bool_in = False
-                list_regions.append((int_start, int_k - 1))
-        if bool_in:
-            list_regions.append((int_start, len(arr_above) - 1))
-        if not list_regions:
+        arr_pad = np.empty(len(arr_above) + 2, dtype=np.int8)
+        arr_pad[0] = 0
+        arr_pad[1:-1] = arr_above.astype(np.int8)
+        arr_pad[-1] = 0
+        arr_diff = np.diff(arr_pad)
+        arr_starts = np.where(arr_diff == 1)[0]
+        arr_ends = np.where(arr_diff == -1)[0] - 1
+        if arr_starts.size == 0:
             continue
+        list_regions = list(zip(arr_starts.tolist(), arr_ends.tolist()))
 
         def _dist(tpl: tp.Tuple[int, int]) -> int:
             return min(abs(tpl[0] - int_center), abs(tpl[1] - int_center))
@@ -208,22 +204,29 @@ def detect_acicular_lsd(
     dict_steps["lsd_04_after_filter"] = arr_step_filtered
 
     list_cands.sort(key=lambda d: d["length"], reverse=True)
-    list_accepted: tp.List[tp.Dict[str, float]] = []
-    for dict_c in list_cands:
-        float_cx = (dict_c["x1"] + dict_c["x2"]) / 2.0
-        float_cy = (dict_c["y1"] + dict_c["y2"]) / 2.0
-        bool_dup = False
-        for dict_p in list_accepted:
-            float_pcx = (dict_p["x1"] + dict_p["x2"]) / 2.0
-            float_pcy = (dict_p["y1"] + dict_p["y2"]) / 2.0
-            float_dist = float(np.sqrt((float_cx - float_pcx) ** 2 + (float_cy - float_pcy) ** 2))
-            float_adiff = abs(dict_c["angle"] - dict_p["angle"])
-            float_adiff = min(float_adiff, 180.0 - float_adiff)
-            if float_dist < CONST_LSD_DEDUP_DIST_PX and float_adiff < CONST_LSD_DEDUP_ANGLE_DEG:
-                bool_dup = True
-                break
-        if not bool_dup:
-            list_accepted.append(dict_c)
+    int_n_cands = len(list_cands)
+    arr_cx = np.array([(d["x1"] + d["x2"]) * 0.5 for d in list_cands], dtype=np.float32)
+    arr_cy = np.array([(d["y1"] + d["y2"]) * 0.5 for d in list_cands], dtype=np.float32)
+    arr_ang = np.array([d["angle"] for d in list_cands], dtype=np.float32)
+    list_accepted_idx: tp.List[int] = []
+    arr_acc_cx = np.empty(int_n_cands, dtype=np.float32)
+    arr_acc_cy = np.empty(int_n_cands, dtype=np.float32)
+    arr_acc_ang = np.empty(int_n_cands, dtype=np.float32)
+    int_n_acc = 0
+    for int_i in range(int_n_cands):
+        if int_n_acc > 0:
+            arr_d = np.sqrt((arr_cx[int_i] - arr_acc_cx[:int_n_acc]) ** 2
+                            + (arr_cy[int_i] - arr_acc_cy[:int_n_acc]) ** 2)
+            arr_ad = np.abs(arr_ang[int_i] - arr_acc_ang[:int_n_acc])
+            arr_ad = np.minimum(arr_ad, 180.0 - arr_ad)
+            if np.any((arr_d < CONST_LSD_DEDUP_DIST_PX) & (arr_ad < CONST_LSD_DEDUP_ANGLE_DEG)):
+                continue
+        arr_acc_cx[int_n_acc] = arr_cx[int_i]
+        arr_acc_cy[int_n_acc] = arr_cy[int_i]
+        arr_acc_ang[int_n_acc] = arr_ang[int_i]
+        int_n_acc += 1
+        list_accepted_idx.append(int_i)
+    list_accepted = [list_cands[int_i] for int_i in list_accepted_idx]
 
     # step 5: after deduplication (orange)
     arr_step_deduped = arr_roi_bgr.copy()

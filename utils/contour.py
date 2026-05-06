@@ -32,7 +32,7 @@ def fuse_contours(
     if n <= 1:
         return list_objects, list_masks
 
-    list_areas = [float(m.sum()) for m in list_masks]
+    arr_areas = np.array([float(m.sum()) for m in list_masks], dtype=np.float64)
     parent = list(range(n))
 
     def _find(i: int) -> int:
@@ -41,29 +41,34 @@ def fuse_contours(
             i = parent[i]
         return i
 
-    list_bboxes = [
-        (o.int_bboxX, o.int_bboxY, o.int_bboxX + o.int_bboxWidth, o.int_bboxY + o.int_bboxHeight)
-        for o in list_objects
-    ]
+    # 벡터화된 bbox overlap 행렬 사전 계산
+    arr_bx1 = np.array([o.int_bboxX for o in list_objects], dtype=np.int32)
+    arr_by1 = np.array([o.int_bboxY for o in list_objects], dtype=np.int32)
+    arr_bx2 = arr_bx1 + np.array([o.int_bboxWidth for o in list_objects], dtype=np.int32)
+    arr_by2 = arr_by1 + np.array([o.int_bboxHeight for o in list_objects], dtype=np.int32)
+    arr_angles = np.array([o.float_minRectAngle for o in list_objects], dtype=np.float32)
 
-    for i in range(n):
-        for j in range(i + 1, n):
-            float_adiff = abs(list_objects[i].float_minRectAngle - list_objects[j].float_minRectAngle)
-            float_adiff = min(float_adiff, 180.0 - float_adiff)
-            if float_adiff > float_angle_tol_deg:
-                continue
-            ax1, ay1, ax2, ay2 = list_bboxes[i]
-            bx1, by1, bx2, by2 = list_bboxes[j]
-            if ax2 <= bx1 or bx2 <= ax1 or ay2 <= by1 or by2 <= ay1:
-                continue
-            float_inter = float((list_masks[i] & list_masks[j]).sum())
-            if float_inter <= 0.0:
-                continue
-            if float_inter / max(min(list_areas[i], list_areas[j]), 1.0) < float_overlap_ratio:
-                continue
-            pi, pj = _find(i), _find(j)
-            if pi != pj:
-                parent[pi] = pj
+    arr_bbox_ok = (
+        (arr_bx2[:, None] > arr_bx1[None, :]) & (arr_bx2[None, :] > arr_bx1[:, None]) &
+        (arr_by2[:, None] > arr_by1[None, :]) & (arr_by2[None, :] > arr_by1[:, None])
+    )
+
+    arr_adiff = np.abs(arr_angles[:, None] - arr_angles[None, :])
+    arr_adiff = np.minimum(arr_adiff, 180.0 - arr_adiff)
+    arr_angle_ok = arr_adiff < float_angle_tol_deg
+
+    arr_candidate = np.triu(arr_bbox_ok & arr_angle_ok, k=1)
+    list_pairs = list(zip(*np.where(arr_candidate)))
+
+    for int_i, int_j in list_pairs:
+        float_inter = float((list_masks[int_i] & list_masks[int_j]).sum())
+        if float_inter <= 0.0:
+            continue
+        if float_inter / max(min(arr_areas[int_i], arr_areas[int_j]), 1.0) < float_overlap_ratio:
+            continue
+        pi, pj = _find(int_i), _find(int_j)
+        if pi != pj:
+            parent[pi] = pj
 
     groups: tp.Dict[int, tp.List[int]] = {}
     for i in range(n):
