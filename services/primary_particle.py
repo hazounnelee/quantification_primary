@@ -28,7 +28,7 @@ from utils.image import detect_sphere_roi, compute_center_roi, compute_adaptive_
 from utils.lsd import detect_acicular_lsd
 from utils.contour import fuse_contours
 from utils.io import collect_input_groups, build_image_output_dir
-from services.sam2_service import Sam2AspectRatioService
+from services.sam2_service import Sam2AspectRatioService, CONST_SCALE_REFERENCE_WIDTH
 
 
 def _draw_masks_on_roi(
@@ -125,8 +125,13 @@ class PrimaryParticleService(Sam2AspectRatioService):
     """1차 입자 segmentation, 측정, 저장 서비스."""
 
     def __init__(self, obj_config: PrimaryParticleConfig) -> None:
-        super().__init__(obj_config)
-        self.obj_primary_config: PrimaryParticleConfig = obj_config
+        super().__init__(obj_config)  # self.obj_config = scale_pixels 보정된 config
+        import dataclasses
+        float_factor = obj_config.int_preprocessWidth / CONST_SCALE_REFERENCE_WIDTH
+        self.obj_primary_config: PrimaryParticleConfig = dataclasses.replace(
+            self.obj_config,
+            int_lsdMinLengthPx=round(obj_config.int_lsdMinLengthPx * float_factor),
+        )
 
     def validate_inputs(self) -> None:
         """LSD 모드에서는 모델 파일 불필요 → 이미지와 config만 확인한다."""
@@ -1847,8 +1852,8 @@ def build_primary_arg_parser() -> argparse.ArgumentParser:
         help="전처리 이미지 가로 크기 (px). 세로는 비율에 맞게 자동 계산. 기본값: 1024.",
     )
     obj_parser.add_argument(
-        "--min_length", type=int, default=20,
-        help="LSD 선분 최소 길이 (px). 이 값보다 짧은 선분은 무시된다. 기본값: 20.",
+        "--min_length", type=int, default=10,
+        help="LSD 컨투어 최소 장축 길이 (px, 1024 기준). preprocess_width에 비례 자동 조정. 기본값: 10.",
     )
     obj_parser.add_argument(
         "--lsd_adaptive_thresh",

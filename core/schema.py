@@ -85,7 +85,7 @@ class PrimaryParticleConfig(Sam2AspectRatioConfig):
     bool_lsdAdaptiveThresh: bool = False
 
     bool_arScreen: bool = False
-    int_lsdMinLengthPx: int = 20
+    int_lsdMinLengthPx: int = 10
     bool_fuseContours: bool = False
 
 
