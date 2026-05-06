@@ -34,6 +34,7 @@ from utils.histograms import (
 CONST_PREPROCESS_WIDTH: int = 2048
 CONST_PREPROCESS_HEIGHT: int = 1636
 CONST_PREPROCESS_BOTTOM_CROP: int = 100
+CONST_SCALE_REFERENCE_WIDTH: int = 1024  # presets.yaml scale_pixels 기준 해상도
 
 
 class Sam2AspectRatioService:
@@ -51,6 +52,13 @@ class Sam2AspectRatioService:
         Args:
             obj_config: 경로, 추론 파라미터, 후처리 파라미터를 포함한 설정 객체.
         """
+        if obj_config.int_preprocessWidth != CONST_SCALE_REFERENCE_WIDTH:
+            import dataclasses
+            float_factor = obj_config.int_preprocessWidth / CONST_SCALE_REFERENCE_WIDTH
+            obj_config = dataclasses.replace(
+                obj_config,
+                float_scalePixels=obj_config.float_scalePixels * float_factor,
+            )
         self.obj_config = obj_config
         self.obj_model: tp.Optional[tp.Any] = None
         self.dict_modelConfig: tp.Dict[str, tp.Any] = dict()
