@@ -34,7 +34,7 @@ class Sam2AspectRatioConfig:
     float_bboxDedupIou: float = 0.85
     bool_usePointPrompts: bool = True
     bool_smallParticle: bool = False
-    float_scalePixels: float = 147.0
+    float_scalePixels: float = 74.0
     float_scaleMicrometers: float = 1.0
     str_device: tp.Optional[str] = None
     bool_retinaMasks: bool = True

@@ -16,9 +16,9 @@ from utils.metrics import calculate_mean_from_optional_values, calculate_percent
 
 # ── Secondary-specific constants ──────────────────────────────────────────────
 CONST_PARTICLE_AREA_THRESHOLD: float = 1500.0
-CONST_SCALE_PIXELS: float = 147.0          # 20k: 147 px = 1 µm
+CONST_SCALE_PIXELS: float = 74.0           # 20k @ 1024px: 74 px = 1 µm
 CONST_SCALE_MICROMETERS: float = 1.0
-CONST_SMALL_PARTICLE_SCALE_PIXELS: float = 371.0  # 50k: 371 px = 1 µm
+CONST_SMALL_PARTICLE_SCALE_PIXELS: float = 185.0  # 50k @ 1024px: 185 px = 1 µm
 CONST_SMALL_PARTICLE_SCALE_MICROMETERS: float = 1.0
 CONST_DEFAULT_SMALL_PARTICLE: bool = False
 
@@ -354,11 +354,11 @@ def build_secondary_arg_parser() -> argparse.ArgumentParser:
     obj_parser.add_argument("--use_point_prompts", action=argparse.BooleanOptionalAction,
                             default=CONST_DEFAULT_USE_POINT_PROMPTS)
     obj_parser.add_argument("--small_particle", action="store_true",
-                            help="50k 배율 scale 사용 (371 px = 1 µm). "
-                                 "--scale_pixels/--scale_um으로 직접 지정하면 이 값보다 우선됨")
+                            help="50k 배율 scale 사용 (185 px/µm @ 1024px). "
+                                 "--magnification 또는 --scale_pixels로 직접 지정하면 이 값보다 우선됨")
     obj_parser.add_argument("--scale_pixels", type=float, default=0.0,
-                            help="스케일 기준 pixel 수 (0 = 배율 preset 사용). "
-                                 "20k=147, 50k=371")
+                            help="스케일 기준 pixel 수 (0 = --magnification 또는 preset 사용). "
+                                 "20k@1024=74, 50k@1024=185")
     obj_parser.add_argument("--scale_um", type=float, default=0.0,
                             help="스케일 기준 µm 값 (0 = 배율 preset 사용)")
     obj_parser.add_argument("--eq_diameter", action=argparse.BooleanOptionalAction, default=True,

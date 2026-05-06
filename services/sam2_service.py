@@ -23,9 +23,6 @@ from utils.metrics import convert_pixels_to_micrometers, calculate_mean_from_opt
 from utils.iou import calculate_binary_iou, calculate_box_iou
 from utils.io import iter_chunks, collect_input_groups, build_image_output_dir
 from utils.histograms import (
-    load_particle_mean_sizes_from_csv,
-    get_lot_number_from_input_path,
-    load_particle_sphericities_from_csv,
     save_particle_distribution_histogram,
     save_sphericity_distribution_histogram,
 )
