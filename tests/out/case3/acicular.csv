@@ -1,0 +1,2 @@
+﻿int_index,str_category,int_maskArea,float_confidence,int_bboxX,int_bboxY,int_bboxWidth,int_bboxHeight,float_centroidX,float_centroidY,float_thicknessPx,float_longAxisPx,float_minRectAngle,float_thicknessUm,float_longAxisUm,float_aspectRatio,int_longestHorizontal,int_longestVertical,float_longestHorizontalUm,float_longestVerticalUm
+0,acicular,5282,,505,433,189,199,599.0213623046875,531.6090087890625,21.107200622558594,253.78111267089844,46.90913896155763,0.1435863987929156,1.7264021270129144,0.08317088848897224,189,199,1.2857142857142856,1.3537414965986394

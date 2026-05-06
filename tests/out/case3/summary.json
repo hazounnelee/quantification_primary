@@ -1,0 +1,58 @@
+{
+  "input_path": "tests/data/test_acicular.png",
+  "output_dir": "tests/out/case3",
+  "model_weights_path": "model/sam2.1_hiera_base_plus.pt",
+  "particle_type": "acicular",
+  "magnification": "unknown",
+  "scale_pixels": 147.0,
+  "scale_micrometers": 1.0,
+  "micrometers_per_pixel": 0.006802721088435374,
+  "acicular_threshold": 0.4,
+  "particle_mode": "acicular",
+  "auto_center_crop": false,
+  "center_crop_ratio": 0.85,
+  "particle_area_threshold": 20.0,
+  "num_total_objects": 1,
+  "num_acicular": 1,
+  "acicular_thickness_um": {
+    "mean": 0.1435863971710205,
+    "median": 0.1435863971710205,
+    "std": 0.0,
+    "min": 0.1435863971710205,
+    "max": 0.1435863971710205
+  },
+  "acicular_long_axis_um": {
+    "mean": 1.7264021635055542,
+    "median": 1.7264021635055542,
+    "std": 0.0,
+    "min": 1.7264021635055542,
+    "max": 1.7264021635055542
+  },
+  "acicular_aspect_ratio": {
+    "mean": 0.08317089080810547,
+    "median": 0.08317089080810547,
+    "std": 0.0,
+    "min": 0.08317089080810547,
+    "max": 0.08317089080810547
+  },
+  "all_primary_thickness_um": {
+    "mean": 0.1435863971710205,
+    "median": 0.1435863971710205,
+    "std": 0.0,
+    "min": 0.1435863971710205,
+    "max": 0.1435863971710205
+  },
+  "all_primary_thickness_um_raw": [
+    0.1435863987929156
+  ],
+  "roi": {
+    "x_min": 0,
+    "y_min": 0,
+    "x_max": 1024,
+    "y_max": 768,
+    "width": 1024,
+    "height": 768
+  },
+  "measure_mode": "lsd",
+  "roi_density": 0.0066
+}
