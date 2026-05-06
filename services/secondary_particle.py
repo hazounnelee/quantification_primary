@@ -18,9 +18,6 @@ from utils.metrics import calculate_mean_from_optional_values, calculate_percent
 CONST_PARTICLE_AREA_THRESHOLD: float = 1500.0
 CONST_SCALE_PIXELS: float = 74.0           # 20k @ 1024px: 74 px = 1 µm
 CONST_SCALE_MICROMETERS: float = 1.0
-CONST_SMALL_PARTICLE_SCALE_PIXELS: float = 185.0  # 50k @ 1024px: 185 px = 1 µm
-CONST_SMALL_PARTICLE_SCALE_MICROMETERS: float = 1.0
-CONST_DEFAULT_SMALL_PARTICLE: bool = False
 
 CONST_BBOX_EDGE_MARGIN: int = 8
 CONST_TILE_EDGE_MARGIN: int = 8
@@ -193,7 +190,6 @@ def run_secondary_particle_analysis(
     float_dedupIou: float = CONST_DEFAULT_DEDUP_IOU,
     float_bboxDedupIou: float = CONST_DEFAULT_BBOX_DEDUP_IOU,
     bool_usePointPrompts: bool = CONST_DEFAULT_USE_POINT_PROMPTS,
-    bool_smallParticle: bool = CONST_DEFAULT_SMALL_PARTICLE,
     float_scalePixels: float = 0.0,
     float_scaleMicrometers: float = 0.0,
     str_device: tp.Optional[str] = None,
@@ -210,8 +206,8 @@ def run_secondary_particle_analysis(
 
     # Explicit scale overrides take priority; fall back to magnification presets
     if float_scalePixels <= 0.0 or float_scaleMicrometers <= 0.0:
-        float_scalePixels = CONST_SMALL_PARTICLE_SCALE_PIXELS if bool_smallParticle else CONST_SCALE_PIXELS
-        float_scaleMicrometers = CONST_SMALL_PARTICLE_SCALE_MICROMETERS if bool_smallParticle else CONST_SCALE_MICROMETERS
+        float_scalePixels = CONST_SCALE_PIXELS
+        float_scaleMicrometers = CONST_SCALE_MICROMETERS
 
     def _create_config(str_groupId: str, path_image: Path) -> Sam2AspectRatioConfig:
         return Sam2AspectRatioConfig(
@@ -242,7 +238,6 @@ def run_secondary_particle_analysis(
             float_dedupIou=float_dedupIou,
             float_bboxDedupIou=float_bboxDedupIou,
             bool_usePointPrompts=bool_usePointPrompts,
-            bool_smallParticle=bool_smallParticle,
             float_scalePixels=float_scalePixels,
             float_scaleMicrometers=float_scaleMicrometers,
             str_device=str_device,
@@ -353,9 +348,6 @@ def build_secondary_arg_parser() -> argparse.ArgumentParser:
     obj_parser.add_argument("--bbox_dedup_iou", type=float, default=CONST_DEFAULT_BBOX_DEDUP_IOU)
     obj_parser.add_argument("--use_point_prompts", action=argparse.BooleanOptionalAction,
                             default=CONST_DEFAULT_USE_POINT_PROMPTS)
-    obj_parser.add_argument("--small_particle", action="store_true",
-                            help="50k 배율 scale 사용 (185 px/µm @ 1024px). "
-                                 "--magnification 또는 --scale_pixels로 직접 지정하면 이 값보다 우선됨")
     obj_parser.add_argument("--scale_pixels", type=float, default=0.0,
                             help="스케일 기준 pixel 수 (0 = --magnification 또는 preset 사용). "
                                  "20k@1024=74, 50k@1024=185")

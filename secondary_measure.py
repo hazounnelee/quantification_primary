@@ -79,7 +79,6 @@ def main() -> None:
         float_dedupIou=obj_args.dedup_iou,
         float_bboxDedupIou=obj_args.bbox_dedup_iou,
         bool_usePointPrompts=obj_args.use_point_prompts,
-        bool_smallParticle=obj_args.small_particle,
         float_scalePixels=obj_args.scale_pixels,
         float_scaleMicrometers=obj_args.scale_um,
         bool_retinaMasks=obj_args.retina_masks,
