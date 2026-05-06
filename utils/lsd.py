@@ -97,6 +97,7 @@ def _is_bbox_near_edge(
     )
 
 
+
 def detect_acicular_lsd(
     arr_roi_gray: np.ndarray,
     arr_roi_bgr: np.ndarray,

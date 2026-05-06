@@ -1012,6 +1012,8 @@ class Sam2AspectRatioService:
             "particle_size_std_um": None,
             "particle_size_min_um": None,
             "particle_size_max_um": None,
+            "particle_sphericity_raw": [],
+            "particle_size_um_raw": [],
         }
 
         if list_particleSphs:
@@ -1022,6 +1024,7 @@ class Sam2AspectRatioService:
                 "particle_sphericity_std": float(np.std(arr_sphs)),
                 "particle_sphericity_min": float(np.min(arr_sphs)),
                 "particle_sphericity_max": float(np.max(arr_sphs)),
+                "particle_sphericity_raw": [float(v) for v in list_particleSphs],
             })
 
         if list_particleSizes:
@@ -1032,6 +1035,7 @@ class Sam2AspectRatioService:
                 "particle_size_std_um": float(np.std(arr_sizes)),
                 "particle_size_min_um": float(np.min(arr_sizes)),
                 "particle_size_max_um": float(np.max(arr_sizes)),
+                "particle_size_um_raw": [float(v) for v in list_particleSizes],
             })
 
         return dict_summary

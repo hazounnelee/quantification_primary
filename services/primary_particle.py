@@ -3,7 +3,10 @@ import argparse
 import csv
 import json
 import sys
+import time
 import typing as tp
+
+from tqdm import tqdm
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -883,6 +886,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
             f"{str_type}_long_axis_um": _stats(list_longAxisUm),
             f"{str_type}_aspect_ratio": _stats(list_aspectRatio),
             "all_primary_thickness_um": _stats(list_thicknessUm),
+            "all_primary_thickness_um_raw": [float(v) for v in list_thicknessUm],
         }
 
     # ----------------------------------------------------------
@@ -1320,6 +1324,19 @@ def build_primary_img_id_summary(
         ]
         return calculate_mean_from_optional_values(list_vals)
 
+    def _pooled_stats(list_vals: tp.List[float]) -> tp.Dict[str, tp.Optional[float]]:
+        if not list_vals:
+            return {"mean": None, "median": None, "std": None}
+        arr = np.array(list_vals, dtype=np.float64)
+        return {"mean": float(np.mean(arr)), "median": float(np.median(arr)), "std": float(np.std(arr))}
+
+    list_pooled_thickness: tp.List[float] = []
+    for d in list_fileSummaries:
+        list_pooled_thickness.extend(d.get("all_primary_thickness_um_raw", []))
+
+    list_densities = [d["roi_density"] for d in list_fileSummaries if d.get("roi_density") is not None]
+    list_times = [d["processing_time_sec"] for d in list_fileSummaries if d.get("processing_time_sec") is not None]
+
     return {
         "img_id": str_imgId,
         "output_dir": str(path_outputRoot / str_imgId),
@@ -1339,8 +1356,11 @@ def build_primary_img_id_summary(
         "plate_long_axis_um_mean": _mean_stat("plate_long_axis_um", "mean"),
         "plate_aspect_ratio_mean": _mean_stat("plate_aspect_ratio", "mean"),
         "all_primary_thickness_um_mean": _mean_stat("all_primary_thickness_um", "mean"),
-        "roi_density_mean": calculate_mean_from_optional_values(
-            d.get("roi_density") for d in list_fileSummaries),
+        "all_primary_thickness_um": _pooled_stats(list_pooled_thickness),
+        "roi_density_mean": calculate_mean_from_optional_values(list_densities),
+        "roi_density": _pooled_stats(list_densities),
+        "all_primary_thickness_um_raw": list_pooled_thickness,
+        "processing_time_sec": _pooled_stats(list_times),
         "files": list_fileSummaries,
     }
 
@@ -1351,6 +1371,24 @@ def build_primary_batch_summary(
     list_groupSummaries: tp.List[tp.Dict[str, tp.Any]],
 ) -> tp.Dict[str, tp.Any]:
     """1차 입자 배치 전체 통합 summary 를 생성한다."""
+
+    def _pooled_stats(list_vals: tp.List[float]) -> tp.Dict[str, tp.Optional[float]]:
+        if not list_vals:
+            return {"mean": None, "median": None, "std": None}
+        arr = np.array(list_vals, dtype=np.float64)
+        return {"mean": float(np.mean(arr)), "median": float(np.median(arr)), "std": float(np.std(arr))}
+
+    list_all_thickness: tp.List[float] = []
+    list_all_densities: tp.List[float] = []
+    list_all_times: tp.List[float] = []
+    for g in list_groupSummaries:
+        list_all_thickness.extend(g.get("all_primary_thickness_um_raw", []))
+        for f in g.get("files", []):
+            if f.get("roi_density") is not None:
+                list_all_densities.append(float(f["roi_density"]))
+            if f.get("processing_time_sec") is not None:
+                list_all_times.append(float(f["processing_time_sec"]))
+
     return {
         "input_path": str(path_input),
         "output_dir": str(path_outputDir),
@@ -1371,8 +1409,10 @@ def build_primary_batch_summary(
             d.get("plate_thickness_um_mean") for d in list_groupSummaries),
         "all_primary_thickness_um_mean": calculate_mean_from_optional_values(
             d.get("all_primary_thickness_um_mean") for d in list_groupSummaries),
-        "roi_density_mean": calculate_mean_from_optional_values(
-            d.get("roi_density_mean") for d in list_groupSummaries),
+        "all_primary_thickness_um": _pooled_stats(list_all_thickness),
+        "roi_density_mean": calculate_mean_from_optional_values(list_all_densities),
+        "roi_density": _pooled_stats(list_all_densities),
+        "processing_time_sec": _pooled_stats(list_all_times),
         "img_ids": list_groupSummaries,
     }
 
@@ -1526,26 +1566,21 @@ def run_primary_particle_analysis(
     obj_sharedService.initialize_model()
 
     list_groupSummaries: tp.List[tp.Dict[str, tp.Any]] = []
-    int_numGroups = len(list_inputGroups)
 
-    for int_gi, (str_groupId, list_imagePaths) in enumerate(list_inputGroups, start=1):
-        print(
-            f"[batch][group {int_gi}/{int_numGroups}] IMG_ID={str_groupId} "
-            f"({len(list_imagePaths)} images)",
-            flush=True,
-        )
+    for str_groupId, list_imagePaths in tqdm(list_inputGroups, desc="groups", unit="group"):
         list_fileSummaries: tp.List[tp.Dict[str, tp.Any]] = []
-        int_numImages = len(list_imagePaths)
 
-        for int_ii, path_image in enumerate(list_imagePaths, start=1):
-            print(f"  [image {int_ii}/{int_numImages}] {path_image.name}", flush=True)
+        for path_image in tqdm(list_imagePaths, desc=str_groupId, unit="img", leave=False):
             obj_service = PrimaryParticleService(_create_config(str_groupId, path_image))
             obj_service.obj_model = obj_sharedService.obj_model
             obj_service.dict_modelConfig = dict(obj_sharedService.dict_modelConfig)
+            float_t0 = time.perf_counter()
             obj_result = obj_service.process_primary()
+            float_elapsed = time.perf_counter() - float_t0
             dict_fs = dict(obj_result.dict_summary)
             dict_fs["img_id"] = str_groupId
             dict_fs["image_name"] = path_image.name
+            dict_fs["processing_time_sec"] = round(float_elapsed, 3)
             list_fileSummaries.append(dict_fs)
 
         dict_groupSummary = build_primary_img_id_summary(

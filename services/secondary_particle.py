@@ -1,9 +1,13 @@
 from __future__ import annotations
 import argparse
 import json
+import time
 import typing as tp
 from datetime import datetime
 from pathlib import Path
+
+import numpy as np
+from tqdm import tqdm
 
 from core.schema import Sam2AspectRatioConfig, Sam2AspectRatioResult
 from services.sam2_service import Sam2AspectRatioService
@@ -59,6 +63,13 @@ def _build_image_output_dir(
 
 
 # ── Batch aggregation ──────────────────────────────────────────────────────────
+def _pooled_stats(list_vals: tp.List[float]) -> tp.Dict[str, tp.Optional[float]]:
+    if not list_vals:
+        return {"mean": None, "median": None, "std": None}
+    arr = np.array(list_vals, dtype=np.float64)
+    return {"mean": float(np.mean(arr)), "median": float(np.median(arr)), "std": float(np.std(arr))}
+
+
 def _build_img_id_summary(
     str_imgId: str,
     path_outputRoot: Path,
@@ -67,6 +78,19 @@ def _build_img_id_summary(
     int_totalObjects = int(sum(d.get("num_total_objects", 0) for d in list_fileSummaries))
     int_particleCount = int(sum(d.get("num_particles", 0) for d in list_fileSummaries))
     int_fragmentCount = int(sum(d.get("num_fragments", 0) for d in list_fileSummaries))
+
+    list_pooled_sphs: tp.List[float] = []
+    list_pooled_sizes: tp.List[float] = []
+    list_fine_ratios: tp.List[float] = []
+    list_times: tp.List[float] = []
+    for d in list_fileSummaries:
+        list_pooled_sphs.extend(d.get("particle_sphericity_raw", []))
+        list_pooled_sizes.extend(d.get("particle_size_um_raw", []))
+        if d.get("fine_particle_ratio_percent") is not None:
+            list_fine_ratios.append(float(d["fine_particle_ratio_percent"]))
+        if d.get("processing_time_sec") is not None:
+            list_times.append(float(d["processing_time_sec"]))
+
     return {
         "img_id": str_imgId,
         "output_dir": str(path_outputRoot / str_imgId),
@@ -79,12 +103,18 @@ def _build_img_id_summary(
         "normal_particle_count": int_particleCount,
         "fine_particle_count": int_fragmentCount,
         "fine_particle_ratio_percent": calculate_percentage(int_fragmentCount, int_totalObjects),
+        "fine_particle_ratio_percent_stats": _pooled_stats(list_fine_ratios),
         "fragment_count_mean_per_image": calculate_mean_from_optional_values(
             float(d.get("fragment_count", 0)) for d in list_fileSummaries),
         "particle_sphericity_mean": calculate_mean_from_optional_values(
             d.get("particle_sphericity_mean") for d in list_fileSummaries),
+        "particle_sphericity": _pooled_stats(list_pooled_sphs),
         "particle_mean_size_um": calculate_mean_from_optional_values(
             d.get("particle_mean_size_um") for d in list_fileSummaries),
+        "particle_size_um": _pooled_stats(list_pooled_sizes),
+        "particle_sphericity_raw": list_pooled_sphs,
+        "particle_size_um_raw": list_pooled_sizes,
+        "processing_time_sec": _pooled_stats(list_times),
         "files": list_fileSummaries,
     }
 
@@ -97,6 +127,20 @@ def _build_batch_summary(
     int_totalObjects = int(sum(d.get("num_total_objects", 0) for d in list_groupSummaries))
     int_particleCount = int(sum(d.get("num_particles", 0) for d in list_groupSummaries))
     int_fragmentCount = int(sum(d.get("num_fragments", 0) for d in list_groupSummaries))
+
+    list_all_sphs: tp.List[float] = []
+    list_all_sizes: tp.List[float] = []
+    list_all_fine_ratios: tp.List[float] = []
+    list_all_times: tp.List[float] = []
+    for g in list_groupSummaries:
+        list_all_sphs.extend(g.get("particle_sphericity_raw", []))
+        list_all_sizes.extend(g.get("particle_size_um_raw", []))
+        for f in g.get("files", []):
+            if f.get("fine_particle_ratio_percent") is not None:
+                list_all_fine_ratios.append(float(f["fine_particle_ratio_percent"]))
+            if f.get("processing_time_sec") is not None:
+                list_all_times.append(float(f["processing_time_sec"]))
+
     return {
         "input_path": str(path_input),
         "output_dir": str(path_outputDir),
@@ -107,12 +151,16 @@ def _build_batch_summary(
         "num_fragments": int_fragmentCount,
         "fragment_count_total": int(sum(d.get("fragment_count_total", 0) for d in list_groupSummaries)),
         "fine_particle_ratio_percent": calculate_percentage(int_fragmentCount, int_totalObjects),
+        "fine_particle_ratio_percent_stats": _pooled_stats(list_all_fine_ratios),
         "fragment_count_mean_per_img_id": calculate_mean_from_optional_values(
             d.get("fragment_count_mean_per_image") for d in list_groupSummaries),
         "particle_sphericity_mean": calculate_mean_from_optional_values(
             d.get("particle_sphericity_mean") for d in list_groupSummaries),
+        "particle_sphericity": _pooled_stats(list_all_sphs),
         "particle_mean_size_um": calculate_mean_from_optional_values(
             d.get("particle_mean_size_um") for d in list_groupSummaries),
+        "particle_size_um": _pooled_stats(list_all_sizes),
+        "processing_time_sec": _pooled_stats(list_all_times),
         "img_ids": list_groupSummaries,
     }
 
@@ -217,24 +265,22 @@ def run_secondary_particle_analysis(
     obj_sharedService.initialize_model()
 
     list_groupSummaries: tp.List[tp.Dict[str, tp.Any]] = []
-    int_numGroups = len(list_inputGroups)
 
-    for int_gi, (str_groupId, list_imagePaths) in enumerate(list_inputGroups, start=1):
-        print(f"[batch][group {int_gi}/{int_numGroups}] IMG_ID={str_groupId} "
-              f"({len(list_imagePaths)} images)", flush=True)
+    for str_groupId, list_imagePaths in tqdm(list_inputGroups, desc="groups", unit="group"):
         list_fileSummaries: tp.List[tp.Dict[str, tp.Any]] = []
 
-        for int_ii, path_image in enumerate(list_imagePaths, start=1):
-            print(f"  [image {int_ii}/{len(list_imagePaths)}] {path_image.name}", flush=True)
+        for path_image in tqdm(list_imagePaths, desc=str_groupId, unit="img", leave=False):
             obj_service = Sam2AspectRatioService(_create_config(str_groupId, path_image))
             obj_service.obj_model = obj_sharedService.obj_model
             obj_service.dict_modelConfig = dict(obj_sharedService.dict_modelConfig)
+            float_t0 = time.perf_counter()
             obj_result = obj_service.process()
-
+            float_elapsed = time.perf_counter() - float_t0
             dict_fs = dict(obj_result.dict_summary)
             dict_fs["img_id"] = str_groupId
             dict_fs["image_name"] = path_image.name
             dict_fs["image_path"] = str(path_image)
+            dict_fs["processing_time_sec"] = round(float_elapsed, 3)
             list_fileSummaries.append(dict_fs)
 
         dict_groupSummary = _build_img_id_summary(str_groupId, path_outputRoot, list_fileSummaries)

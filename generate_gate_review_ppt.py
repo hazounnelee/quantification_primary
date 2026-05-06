@@ -607,7 +607,7 @@ _bullets(s, [
     (1, "RAM: [GB]  |  VRAM: [GB]"),
     "1차 입자 분석 실행",
     (1, "python primary_measure.py --input [경로]"),
-    (1, "  --preset acicular_20k  --lsd_fuse_segments"),
+    (1, "  --preset acicular_20k"),
     "2차 입자 분석 실행",
     (1, "python secondary_measure.py --input [경로]"),
     (1, "  --preset secondary_20k"),
@@ -754,7 +754,7 @@ for i, label in enumerate(["원본 ROI", "이진화 결과", "LSD 검출 결과"
 
 _bullets(s, [
     "빨강/파랑 선분: 검출된 침상 선분  |  각 선분에 두께(µm) 라벨 표시",
-    "선분 융합(--lsd_fuse_segments, 기본 ON): 같은 침상이 여러 조각으로 검출될 때 하나로 통합",
+
     "ROI 밀도(roi_density): 이진화 이미지 흰 픽셀 비율 — 침상 밀집도 지표",
 ], Inches(0.4), Inches(5.1), Inches(12.5), Inches(0.65),
    sz=Pt(12), color=DGRAY, gap=Pt(3))
@@ -819,8 +819,6 @@ _text(s, "주요 LSD 파라미터 변경에 따른 검출 결과 비교",
       Inches(0.4), Inches(0.85), Inches(12.5), Inches(0.4), sz=Pt(13), color=MGRAY)
 
 params = [
-    ("--lsd_fuse_segments",  "ON (기본값)", "OFF",
-     "같은 침상이 여러 선분으로 검출될 때 융합 → 장축 길이 과소평가 방지"),
     ("--lsd_adaptive_thresh","OFF (기본값)", "ON",
      "조명 불균일 이미지에서 Adaptive Gaussian 이진화 → 검출률 향상"),
 ]

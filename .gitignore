@@ -6,3 +6,4 @@ model/
 out_*/
 out_pkg_test_*/
 .claude/
+.DS_Store
