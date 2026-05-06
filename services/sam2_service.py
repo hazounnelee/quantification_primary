@@ -625,6 +625,7 @@ class Sam2AspectRatioService:
         arr_mask: np.ndarray,
         int_index: int,
         float_confidence: tp.Optional[float],
+        bool_convexHullSphericity: bool = False,
     ) -> tp.Optional[ObjectMeasurement]:
         """단일 mask의 측정값을 계산해 `ObjectMeasurement`로 변환한다.
 
@@ -673,7 +674,8 @@ class Sam2AspectRatioService:
 
         float_sphericity = None
         if str_category == "particle":
-            float_perimeter = float(cv2.arcLength(arr_contour, closed=True))
+            arr_perimContour = cv2.convexHull(arr_contour) if bool_convexHullSphericity else arr_contour
+            float_perimeter = float(cv2.arcLength(arr_perimContour, closed=True))
             if float_perimeter > 0.0:
                 float_sphericity = min(1.0, float(
                     (4.0 * np.pi * int_maskArea) / (float_perimeter ** 2)
@@ -1039,10 +1041,14 @@ class Sam2AspectRatioService:
                         arr_mask.astype(np.uint8) * 255)
 
     def process_opencv(self) -> Sam2AspectRatioResult:
-        """OpenCV CLAHE+Otsu 기반 빠른 세그멘테이션 파이프라인."""
+        """OpenCV CLAHE+Otsu+Watershed 기반 세그멘테이션 파이프라인.
+
+        구형도는 convex hull 둘레로 계산해 컨투어 픽셀화 노이즈를 억제한다.
+        """
         arr_inputBgr = self.load_image_bgr()
         arr_inputRoiBgr, dict_roi = self.extract_inference_roi(arr_inputBgr)
 
+        # ── 전처리: CLAHE → Otsu ─────────────────────────────────────────────
         arr_gray = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
         obj_clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         arr_clahe = obj_clahe.apply(arr_gray)
@@ -1060,16 +1066,30 @@ class Sam2AspectRatioService:
                     arr_binary, cv2.MORPH_CLOSE, arr_kernel,
                     iterations=self.obj_config.int_maskMorphCloseIterations)
 
-        int_numLabels, arr_labels, _, _ = cv2.connectedComponentsWithStats(arr_binary)
+        # ── Watershed: distance transform → seed → 분리 ──────────────────────
+        arr_dist = cv2.distanceTransform(arr_binary, cv2.DIST_L2, 5)
+        _, arr_sure_fg = cv2.threshold(arr_dist, 0.6 * arr_dist.max(), 255, cv2.THRESH_BINARY)
+        arr_sure_fg = arr_sure_fg.astype(np.uint8)
+        arr_sure_bg = cv2.dilate(arr_binary, np.ones((3, 3), dtype=np.uint8), iterations=3)
+        arr_unknown = cv2.subtract(arr_sure_bg, arr_sure_fg)
 
+        int_n, arr_markers = cv2.connectedComponents(arr_sure_fg)
+        arr_markers = arr_markers + 1       # 1 = 확실한 배경, 2+ = 각 입자
+        arr_markers[arr_unknown == 255] = 0  # 0 = watershed가 결정할 경계
+        cv2.watershed(arr_inputRoiBgr.copy(), arr_markers)
+
+        # ── 마스크 추출 + 측정 (convex hull 구형도) ──────────────────────────
         list_objects: tp.List[ObjectMeasurement] = []
         list_validMasks: tp.List[np.ndarray] = []
         list_rawMasks: tp.List[np.ndarray] = []
         int_index = 0
-        for int_label in range(1, int_numLabels):
-            arr_mask = (arr_labels == int_label).astype(np.uint8)
+        for int_label in range(2, int_n + 1):
+            arr_mask = ((arr_markers == int_label) & (arr_binary > 0)).astype(np.uint8)
             list_rawMasks.append(arr_mask)
-            obj_measurement = self.measure_mask(arr_mask, int_index=int_index, float_confidence=None)
+            obj_measurement = self.measure_mask(
+                arr_mask, int_index=int_index, float_confidence=None,
+                bool_convexHullSphericity=True,
+            )
             if obj_measurement is None:
                 continue
             list_objects.append(obj_measurement)
@@ -1088,16 +1108,27 @@ class Sam2AspectRatioService:
         dict_summary["measure_mode"] = "opencv"
         dict_debug: tp.Dict[str, tp.Any] = {
             "measure_mode": "opencv",
-            "num_components": int_numLabels - 1,
+            "num_watershed_labels": int_n - 1,
         }
         self.save_outputs(
             arr_inputBgr, arr_inputRoiBgr, arr_overlay,
             list_objects, list_validMasks, dict_summary, dict_roi, dict_debug,
             arr_raw_masks=arr_raw_masks,
         )
+
+        # ── 파이프라인 단계별 이미지 저장 ────────────────────────────────────
         self.obj_config.path_outputDir.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(self.obj_config.path_outputDir / "pipeline_clahe.png"), arr_clahe)
         cv2.imwrite(str(self.obj_config.path_outputDir / "pipeline_binary.png"), arr_binary)
+        arr_dist_viz = cv2.normalize(arr_dist, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+        cv2.imwrite(
+            str(self.obj_config.path_outputDir / "pipeline_dist.png"),
+            cv2.applyColorMap(arr_dist_viz, cv2.COLORMAP_JET),
+        )
+        arr_ws_viz = arr_inputRoiBgr.copy()
+        arr_ws_viz[arr_markers == -1] = [0, 0, 255]
+        cv2.imwrite(str(self.obj_config.path_outputDir / "pipeline_watershed.png"), arr_ws_viz)
+
         return Sam2AspectRatioResult(list_objects=list_objects, dict_summary=dict_summary)
 
     def process(self) -> Sam2AspectRatioResult:
