@@ -1,6 +1,6 @@
 acicular:
   20k:
-    scale_pixels: 73.5
+    scale_pixels: 74.0
     scale_um: 1.0
     particle_mode: acicular
     measure_mode: lsd
@@ -14,7 +14,7 @@ acicular:
     point_min_distance: 8
     area_threshold: 80.0
   50k:
-    scale_pixels: 185.5
+    scale_pixels: 185.0
     scale_um: 1.0
     particle_mode: acicular
     measure_mode: lsd
@@ -28,7 +28,7 @@ acicular:
     area_threshold: 20.0
 plate:
   20k:
-    scale_pixels: 73.5
+    scale_pixels: 74.0
     scale_um: 1.0
     particle_mode: auto
     auto_detect_sphere: true
@@ -41,7 +41,7 @@ plate:
     point_min_distance: 10
     area_threshold: 300.0
   50k:
-    scale_pixels: 185.5
+    scale_pixels: 185.0
     scale_um: 1.0
     particle_mode: auto
     auto_detect_sphere: false
