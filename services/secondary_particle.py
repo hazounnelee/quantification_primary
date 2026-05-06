@@ -190,8 +190,8 @@ def run_secondary_particle_analysis(
     float_dedupIou: float = CONST_DEFAULT_DEDUP_IOU,
     float_bboxDedupIou: float = CONST_DEFAULT_BBOX_DEDUP_IOU,
     bool_usePointPrompts: bool = CONST_DEFAULT_USE_POINT_PROMPTS,
-    float_scalePixels: float = 0.0,
-    float_scaleMicrometers: float = 0.0,
+    float_scalePixels: tp.Optional[float] = None,
+    float_scaleMicrometers: tp.Optional[float] = None,
     str_device: tp.Optional[str] = None,
     bool_retinaMasks: bool = CONST_DEFAULT_RETINA_MASKS,
     bool_saveIndividualMasks: bool = CONST_DEFAULT_SAVE_INDIVIDUAL_MASKS,
@@ -205,7 +205,7 @@ def run_secondary_particle_analysis(
     bool_isBatch = path_input.is_dir()
 
     # Explicit scale overrides take priority; fall back to magnification presets
-    if float_scalePixels <= 0.0 or float_scaleMicrometers <= 0.0:
+    if float_scalePixels is None or float_scaleMicrometers is None:
         float_scalePixels = CONST_SCALE_PIXELS
         float_scaleMicrometers = CONST_SCALE_MICROMETERS
 
@@ -348,11 +348,11 @@ def build_secondary_arg_parser() -> argparse.ArgumentParser:
     obj_parser.add_argument("--bbox_dedup_iou", type=float, default=CONST_DEFAULT_BBOX_DEDUP_IOU)
     obj_parser.add_argument("--use_point_prompts", action=argparse.BooleanOptionalAction,
                             default=CONST_DEFAULT_USE_POINT_PROMPTS)
-    obj_parser.add_argument("--scale_pixels", type=float, default=0.0,
-                            help="스케일 기준 pixel 수 (0 = --magnification 또는 preset 사용). "
+    obj_parser.add_argument("--scale_pixels", type=float, default=None,
+                            help="스케일 기준 pixel 수. 미지정 시 --magnification 또는 기본값(74) 사용. "
                                  "20k@1024=74, 50k@1024=185")
-    obj_parser.add_argument("--scale_um", type=float, default=0.0,
-                            help="스케일 기준 µm 값 (0 = 배율 preset 사용)")
+    obj_parser.add_argument("--scale_um", type=float, default=None,
+                            help="스케일 기준 µm 값. 미지정 시 1.0 사용.")
     obj_parser.add_argument("--eq_diameter", action=argparse.BooleanOptionalAction, default=True,
                             help="크기 측정 방법: equivalent circle diameter(기본값) "
                                  "또는 --no-eq_diameter로 수평/수직 span 평균 사용")
