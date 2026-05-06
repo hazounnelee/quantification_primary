@@ -2,9 +2,11 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import sys
 import time
 import typing as tp
+from concurrent.futures import ThreadPoolExecutor
 
 from tqdm import tqdm
 from dataclasses import asdict
@@ -1601,29 +1603,53 @@ def run_primary_particle_analysis(
     # 배치
     path_outputRoot.mkdir(parents=True, exist_ok=True)
 
-    str_firstGroupId, list_firstImages = list_inputGroups[0]
-    print(f"[batch] init model: {list_firstImages[0].name}", flush=True)
-    obj_sharedService = PrimaryParticleService(
-        _create_config(str_firstGroupId, list_firstImages[0]))
-    obj_sharedService.initialize_model()
+    bool_lsd_mode = str_measureMode == "lsd"
+    obj_sharedService: tp.Optional[PrimaryParticleService] = None
+
+    if not bool_lsd_mode:
+        str_firstGroupId, list_firstImages = list_inputGroups[0]
+        print(f"[batch] init model: {list_firstImages[0].name}", flush=True)
+        obj_sharedService = PrimaryParticleService(
+            _create_config(str_firstGroupId, list_firstImages[0]))
+        obj_sharedService.initialize_model()
+    else:
+        int_workers = min(os.cpu_count() or 4, 8)
+        print(f"[batch] LSD mode — {int_workers} parallel workers", flush=True)
 
     list_groupSummaries: tp.List[tp.Dict[str, tp.Any]] = []
 
     for str_groupId, list_imagePaths in tqdm(list_inputGroups, desc="groups", unit="group"):
-        list_fileSummaries: tp.List[tp.Dict[str, tp.Any]] = []
 
-        for path_image in tqdm(list_imagePaths, desc=str_groupId, unit="img", leave=False):
-            obj_service = PrimaryParticleService(_create_config(str_groupId, path_image))
-            obj_service.obj_model = obj_sharedService.obj_model
-            obj_service.dict_modelConfig = dict(obj_sharedService.dict_modelConfig)
-            float_t0 = time.perf_counter()
-            obj_result = obj_service.process_primary()
-            float_elapsed = time.perf_counter() - float_t0
-            dict_fs = dict(obj_result.dict_summary)
-            dict_fs["img_id"] = str_groupId
-            dict_fs["image_name"] = path_image.name
-            dict_fs["processing_time_sec"] = round(float_elapsed, 3)
-            list_fileSummaries.append(dict_fs)
+        if bool_lsd_mode:
+            def _run_lsd(path_image: Path) -> tp.Dict[str, tp.Any]:
+                obj_svc = PrimaryParticleService(_create_config(str_groupId, path_image))
+                float_t0 = time.perf_counter()
+                obj_res = obj_svc.process_primary()
+                dict_fs = dict(obj_res.dict_summary)
+                dict_fs["img_id"] = str_groupId
+                dict_fs["image_name"] = path_image.name
+                dict_fs["processing_time_sec"] = round(time.perf_counter() - float_t0, 3)
+                return dict_fs
+
+            with ThreadPoolExecutor(max_workers=int_workers) as executor:
+                list_fileSummaries = list(tqdm(
+                    executor.map(_run_lsd, list_imagePaths),
+                    total=len(list_imagePaths), desc=str_groupId, unit="img", leave=False,
+                ))
+        else:
+            list_fileSummaries = []
+            for path_image in tqdm(list_imagePaths, desc=str_groupId, unit="img", leave=False):
+                obj_service = PrimaryParticleService(_create_config(str_groupId, path_image))
+                obj_service.obj_model = obj_sharedService.obj_model  # type: ignore[union-attr]
+                obj_service.dict_modelConfig = dict(obj_sharedService.dict_modelConfig)  # type: ignore[union-attr]
+                float_t0 = time.perf_counter()
+                obj_result = obj_service.process_primary()
+                float_elapsed = time.perf_counter() - float_t0
+                dict_fs = dict(obj_result.dict_summary)
+                dict_fs["img_id"] = str_groupId
+                dict_fs["image_name"] = path_image.name
+                dict_fs["processing_time_sec"] = round(float_elapsed, 3)
+                list_fileSummaries.append(dict_fs)
 
         dict_groupSummary = build_primary_img_id_summary(
             str_groupId, path_outputRoot, list_fileSummaries)
