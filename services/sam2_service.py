@@ -1050,9 +1050,7 @@ class Sam2AspectRatioService:
         # Auto-invert when background dominates (>55% white) so watershed
         # always operates on foreground=particles, consistent with other
         # detection functions.
-        int_h_roi, int_w_roi = arr_binary.shape[:2]
-        int_total_px = int_h_roi * int_w_roi
-        if int_total_px > 0 and float((arr_binary > 0).sum()) / int_total_px > 0.55:
+        if arr_binary.size > 0 and float((arr_binary > 0).sum()) / arr_binary.size > 0.55:
             arr_binary = cv2.bitwise_not(arr_binary)
 
         int_k = self.obj_config.int_maskMorphKernelSize
