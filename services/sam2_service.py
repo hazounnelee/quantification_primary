@@ -5,8 +5,7 @@ import math
 import os
 import shutil
 import typing as tp
-from dataclasses import asdict
-from datetime import datetime
+from dataclasses import asdict, replace as dataclasses_replace
 from pathlib import Path
 
 import cv2
@@ -16,9 +15,9 @@ import yaml
 from core.schema import Sam2AspectRatioConfig, ObjectMeasurement, Sam2AspectRatioResult
 from models import load_sam2_model
 from utils.image import draw_label_no_overlap, create_processing_tiles, enhance_image_texture, sample_interest_points
-from utils.metrics import convert_pixels_to_micrometers, calculate_mean_from_optional_values, calculate_percentage, normalize_image_to_uint8, json_default
+from utils.metrics import convert_pixels_to_micrometers, calculate_percentage, json_default
 from utils.iou import calculate_binary_iou, calculate_box_iou
-from utils.io import iter_chunks, collect_input_groups, build_image_output_dir
+from utils.io import iter_chunks
 from utils.histograms import (
     save_particle_distribution_histogram,
     save_sphericity_distribution_histogram,
@@ -47,9 +46,8 @@ class Sam2AspectRatioService:
             obj_config: 경로, 추론 파라미터, 후처리 파라미터를 포함한 설정 객체.
         """
         if obj_config.int_preprocessWidth != CONST_SCALE_REFERENCE_WIDTH:
-            import dataclasses
             float_factor = obj_config.int_preprocessWidth / CONST_SCALE_REFERENCE_WIDTH
-            obj_config = dataclasses.replace(
+            obj_config = dataclasses_replace(
                 obj_config,
                 float_scalePixels=obj_config.float_scalePixels * float_factor,
             )
