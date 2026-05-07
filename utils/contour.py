@@ -9,6 +9,7 @@ from utils.metrics import convert_pixels_to_micrometers
 
 CONST_FUSE_ANGLE_DEG: float = 15.0
 CONST_FUSE_OVERLAP_RATIO: float = 0.7
+CONST_FUSE_LONG_AXIS_THRESHOLD: float = 0.70
 
 
 def fuse_contours(
@@ -20,12 +21,17 @@ def fuse_contours(
     float_scale_um: float,
     float_angle_tol_deg: float = CONST_FUSE_ANGLE_DEG,
     float_overlap_ratio: float = CONST_FUSE_OVERLAP_RATIO,
+    float_long_axis_threshold: tp.Optional[float] = None,
 ) -> tp.Tuple[tp.List[PrimaryParticleMeasurement], tp.List[np.ndarray]]:
     """Fuse contours (2D masks) that share long-axis direction and overlap significantly.
 
-    Two masks are fused when:
+    Two masks are fused when ALL conditions hold:
       1. |angle_i - angle_j| (mod 180°) < float_angle_tol_deg
       2. intersection_pixels / min(area_i, area_j) >= float_overlap_ratio
+      3. (advanced mode only) centroid displacement is NOT predominantly along the long
+         axis — i.e. d_long / dist < float_long_axis_threshold. This prevents fusing
+         end-to-end needles that happen to overlap at their tips.
+
     Union-find handles chains of 3+ overlapping masks.
     """
     n = len(list_objects)
@@ -47,6 +53,8 @@ def fuse_contours(
     arr_bx2 = arr_bx1 + np.array([o.int_bboxWidth for o in list_objects], dtype=np.int32)
     arr_by2 = arr_by1 + np.array([o.int_bboxHeight for o in list_objects], dtype=np.int32)
     arr_angles = np.array([o.float_minRectAngle for o in list_objects], dtype=np.float32)
+    arr_cx = np.array([o.float_centroidX for o in list_objects], dtype=np.float64)
+    arr_cy = np.array([o.float_centroidY for o in list_objects], dtype=np.float64)
 
     arr_bbox_ok = (
         (arr_bx2[:, None] > arr_bx1[None, :]) & (arr_bx2[None, :] > arr_bx1[:, None]) &
@@ -61,6 +69,22 @@ def fuse_contours(
     list_pairs = list(zip(*np.where(arr_candidate)))
 
     for int_i, int_j in list_pairs:
+        # Advanced fuse: skip if centroid displacement is predominantly along long axis
+        # (end-to-end needles — likely separate particles, not one thick one)
+        if float_long_axis_threshold is not None:
+            float_avg_rad = np.radians(
+                (float(arr_angles[int_i]) + float(arr_angles[int_j])) / 2.0
+            )
+            float_dx = arr_cx[int_j] - arr_cx[int_i]
+            float_dy = arr_cy[int_j] - arr_cy[int_i]
+            float_dist = float(np.sqrt(float_dx ** 2 + float_dy ** 2))
+            if float_dist > 1.0:
+                float_d_long = abs(
+                    float_dx * np.cos(float_avg_rad) + float_dy * np.sin(float_avg_rad)
+                )
+                if float_d_long / float_dist > float_long_axis_threshold:
+                    continue
+
         float_inter = float((list_masks[int_i] & list_masks[int_j]).sum())
         if float_inter <= 0.0:
             continue

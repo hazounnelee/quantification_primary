@@ -26,7 +26,7 @@ from core.schema import (
 from utils.metrics import convert_pixels_to_micrometers, calculate_mean_from_optional_values, calculate_percentage, json_dump_safe, pooled_stats
 from utils.image import detect_sphere_roi, compute_center_roi, compute_adaptive_block_size, draw_label_no_overlap
 from utils.lsd import detect_acicular_lsd
-from utils.contour import fuse_contours
+from utils.contour import fuse_contours, CONST_FUSE_LONG_AXIS_THRESHOLD
 from utils.io import collect_input_groups, build_image_output_dir
 from utils.iou import calculate_binary_iou, calculate_box_iou
 from services.sam2_service import Sam2AspectRatioService, CONST_SCALE_REFERENCE_WIDTH
@@ -1011,7 +1011,16 @@ class PrimaryParticleService(Sam2AspectRatioService):
             dict_lsdSteps["lsd_06_masks_roi"] = _draw_masks_on_roi(
                 arr_inputRoiBgr, list_validMasks)
 
-            if self.obj_primary_config.bool_fuseContours and list_objects:
+            bool_do_fuse = (
+                self.obj_primary_config.bool_fuseContours
+                or self.obj_primary_config.bool_advancedFuseContours
+            )
+            if bool_do_fuse and list_objects:
+                float_long_thresh = (
+                    CONST_FUSE_LONG_AXIS_THRESHOLD
+                    if self.obj_primary_config.bool_advancedFuseContours
+                    else None
+                )
                 int_before = len(list_objects)
                 list_objects, list_validMasks = fuse_contours(
                     list_objects, list_validMasks,
@@ -1019,8 +1028,10 @@ class PrimaryParticleService(Sam2AspectRatioService):
                     str_particle_type=self.obj_primary_config.str_particleType,
                     float_scale_pixels=self.obj_config.float_scalePixels,
                     float_scale_um=self.obj_config.float_scaleMicrometers,
+                    float_long_axis_threshold=float_long_thresh,
                 )
-                print(f"[fuse] {int_before}개 → {len(list_objects)}개", flush=True)
+                str_mode = "advanced_fuse" if self.obj_primary_config.bool_advancedFuseContours else "fuse"
+                print(f"[{str_mode}] {int_before}개 → {len(list_objects)}개", flush=True)
                 dict_lsdSteps["lsd_07_after_fusion"] = _draw_masks_on_roi(
                     arr_inputRoiBgr, list_validMasks)
 
@@ -1173,6 +1184,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
         bool_arScreen: bool,
         int_lsdMinLengthPx: int,
         bool_fuseContours: bool,
+        bool_advancedFuseContours: bool = False,
         int_preprocessWidth: int = 1024,
     ) -> PrimaryParticleConfig:
         return PrimaryParticleConfig(
@@ -1222,6 +1234,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
             bool_arScreen=bool_arScreen,
             int_lsdMinLengthPx=int_lsdMinLengthPx,
             bool_fuseContours=bool_fuseContours,
+            bool_advancedFuseContours=bool_advancedFuseContours,
             int_preprocessWidth=int_preprocessWidth,
         )
 
@@ -1394,6 +1407,7 @@ def run_primary_particle_analysis(
     bool_arScreen: bool = False,
     int_lsdMinLengthPx: int = 20,
     bool_fuseContours: bool = False,
+    bool_advancedFuseContours: bool = False,
     int_preprocessWidth: int = 1024,
 ) -> tp.Dict[str, tp.Any]:
     """외부에서 호출 가능한 최상위 실행 함수.
@@ -1465,6 +1479,7 @@ def run_primary_particle_analysis(
             bool_arScreen=bool_arScreen,
             int_lsdMinLengthPx=int_lsdMinLengthPx,
             bool_fuseContours=bool_fuseContours,
+            bool_advancedFuseContours=bool_advancedFuseContours,
             int_preprocessWidth=int_preprocessWidth,
         )
 
@@ -1760,6 +1775,15 @@ def build_primary_arg_parser() -> argparse.ArgumentParser:
         "--fuse",
         action=argparse.BooleanOptionalAction, default=False,
         help="겹치고 방향이 같은 컨투어를 하나로 융합한다 (Δangle < 15°, 겹침 ≥ 70%%). 기본값: OFF.",
+    )
+    obj_parser.add_argument(
+        "--advanced_fuse",
+        action=argparse.BooleanOptionalAction, default=False,
+        help=(
+            "방향 인식 융합: --fuse 조건에 더해 단축 방향 겹침만 융합한다. "
+            "장축 방향(긴 쪽 끝-끝)으로 붙은 경우는 별개 입자로 보고 융합하지 않는다 "
+            f"(장축 변위 비율 > {CONST_FUSE_LONG_AXIS_THRESHOLD:.0%} → skip). 기본값: OFF."
+        ),
     )
     obj_parser.add_argument(
         "--preprocess_width", type=lambda x: max(64, int(x)), default=1024,

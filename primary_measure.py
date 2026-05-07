@@ -113,6 +113,7 @@ def main() -> None:
         bool_arScreen=obj_args.ar_screen,
         int_lsdMinLengthPx=obj_args.min_length,
         bool_fuseContours=obj_args.fuse,
+        bool_advancedFuseContours=obj_args.advanced_fuse,
         int_preprocessWidth=obj_args.preprocess_width,
     )
 

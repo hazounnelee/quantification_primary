@@ -87,6 +87,7 @@ class PrimaryParticleConfig(Sam2AspectRatioConfig):
     bool_arScreen: bool = False
     int_lsdMinLengthPx: int = 10
     bool_fuseContours: bool = False
+    bool_advancedFuseContours: bool = False
 
 
 @dataclass
