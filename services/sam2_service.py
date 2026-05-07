@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 from core.schema import Sam2AspectRatioConfig, ObjectMeasurement, Sam2AspectRatioResult
 from models import load_sam2_model
 from utils.image import draw_label_no_overlap, create_processing_tiles, enhance_image_texture, sample_interest_points
-from utils.metrics import convert_pixels_to_micrometers, calculate_mean_from_optional_values, calculate_percentage, normalize_image_to_uint8
+from utils.metrics import convert_pixels_to_micrometers, calculate_mean_from_optional_values, calculate_percentage, normalize_image_to_uint8, json_default
 from utils.iou import calculate_binary_iou, calculate_box_iou
 from utils.io import iter_chunks, collect_input_groups, build_image_output_dir
 from utils.histograms import (
@@ -334,8 +334,8 @@ class Sam2AspectRatioService:
                         {
                             "tile_index": int_tileIdx,
                             "tile_xyxy": [int_tx1, int_ty1, int_tx2, int_ty2],
-                            "point_xy_tile": [int_px, int_py],
-                            "point_xy_roi": [int_tx1 + int_px, int_ty1 + int_py],
+                            "point_xy_tile": [int(int_px), int(int_py)],
+                            "point_xy_roi": [int_tx1 + int(int_px), int_ty1 + int(int_py)],
                         }
                     )
 
@@ -1013,14 +1013,14 @@ class Sam2AspectRatioService:
         )
 
         with (self.obj_config.path_outputDir / "summary.json").open("w", encoding="utf-8") as obj_f:
-            json.dump(dict_summary, obj_f, ensure_ascii=False, indent=2)
+            json.dump(dict_summary, obj_f, ensure_ascii=False, indent=2, default=json_default)
 
         with (self.obj_config.path_outputDir / "objects.json").open("w", encoding="utf-8") as obj_f:
             json.dump([asdict(obj_item) for obj_item in list_objects],
-                      obj_f, ensure_ascii=False, indent=2)
+                      obj_f, ensure_ascii=False, indent=2, default=json_default)
 
         with (self.obj_config.path_outputDir / "debug.json").open("w", encoding="utf-8") as obj_f:
-            json.dump(dict_debug, obj_f, ensure_ascii=False, indent=2)
+            json.dump(dict_debug, obj_f, ensure_ascii=False, indent=2, default=json_default)
 
         if not self.obj_config.bool_saveIndividualMasks:
             return
