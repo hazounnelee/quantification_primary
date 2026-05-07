@@ -1436,8 +1436,16 @@ def build_primary_batch_summary(
             sum((d.get("num_fragment") or 0) for d in list_groupSummaries)),
         "acicular_thickness_um_mean": calculate_mean_from_optional_values(
             d.get("acicular_thickness_um_mean") for d in list_groupSummaries),
+        "acicular_long_axis_um_mean": calculate_mean_from_optional_values(
+            d.get("acicular_long_axis_um_mean") for d in list_groupSummaries),
+        "acicular_aspect_ratio_mean": calculate_mean_from_optional_values(
+            d.get("acicular_aspect_ratio_mean") for d in list_groupSummaries),
         "plate_thickness_um_mean": calculate_mean_from_optional_values(
             d.get("plate_thickness_um_mean") for d in list_groupSummaries),
+        "plate_long_axis_um_mean": calculate_mean_from_optional_values(
+            d.get("plate_long_axis_um_mean") for d in list_groupSummaries),
+        "plate_aspect_ratio_mean": calculate_mean_from_optional_values(
+            d.get("plate_aspect_ratio_mean") for d in list_groupSummaries),
         "all_primary_thickness_um_mean": calculate_mean_from_optional_values(
             d.get("all_primary_thickness_um_mean") for d in list_groupSummaries),
         "all_primary_thickness_um": pooled_stats(list_all_thickness),
