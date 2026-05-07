@@ -8,7 +8,7 @@ import time
 
 from services.primary_particle import run_primary_particle_analysis, build_primary_arg_parser
 from configs import get_analysis_preset, load_paths_config, parse_magnification, mag_to_scale_pixels, mag_to_preset_key
-from utils.metrics import json_default, _SafeJSONEncoder
+from utils.metrics import _SafeJSONEncoder
 
 _DEFAULT_PATHS_CONFIG = "configs/paths.yaml"
 

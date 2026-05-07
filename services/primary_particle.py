@@ -24,7 +24,7 @@ from core.schema import (
     PrimaryParticleMeasurement,
     PrimaryParticleResult,
 )
-from utils.metrics import convert_pixels_to_micrometers, calculate_mean_from_optional_values, calculate_percentage, json_default, json_dump_safe, pooled_stats
+from utils.metrics import convert_pixels_to_micrometers, calculate_mean_from_optional_values, calculate_percentage, json_dump_safe, pooled_stats
 from utils.image import detect_sphere_roi, compute_center_roi, compute_adaptive_block_size, draw_label_no_overlap
 from utils.lsd import detect_acicular_lsd
 from utils.contour import fuse_contours

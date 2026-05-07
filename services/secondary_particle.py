@@ -16,7 +16,7 @@ from tqdm import tqdm
 from core.schema import Sam2AspectRatioConfig, Sam2AspectRatioResult
 from services.sam2_service import Sam2AspectRatioService
 from utils.io import collect_input_groups
-from utils.metrics import calculate_mean_from_optional_values, calculate_percentage, json_default, json_dump_safe, pooled_stats
+from utils.metrics import calculate_mean_from_optional_values, calculate_percentage, json_dump_safe, pooled_stats
 
 # ── Secondary-specific constants ──────────────────────────────────────────────
 CONST_PARTICLE_AREA_THRESHOLD: float = 1500.0

@@ -15,7 +15,7 @@ import yaml
 from core.schema import Sam2AspectRatioConfig, ObjectMeasurement, Sam2AspectRatioResult
 from models import load_sam2_model
 from utils.image import draw_label_no_overlap, create_processing_tiles, enhance_image_texture, sample_interest_points
-from utils.metrics import convert_pixels_to_micrometers, calculate_percentage, json_default, json_dump_safe
+from utils.metrics import convert_pixels_to_micrometers, calculate_percentage, json_dump_safe
 from utils.iou import calculate_binary_iou, calculate_box_iou
 from utils.io import iter_chunks
 from utils.histograms import (
