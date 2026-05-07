@@ -24,6 +24,7 @@ from core.schema import (
     PrimaryParticleResult,
 )
 from utils.metrics import convert_pixels_to_micrometers, calculate_mean_from_optional_values, calculate_percentage, json_dump_safe, pooled_stats
+from utils.histograms import save_primary_batch_histograms
 from utils.image import detect_sphere_roi, compute_center_roi, compute_adaptive_block_size, draw_label_no_overlap
 from utils.lsd import detect_acicular_lsd
 from utils.contour import fuse_contours, CONST_FUSE_LONG_AXIS_THRESHOLD
@@ -1576,6 +1577,8 @@ def run_primary_particle_analysis(
         path_input, path_outputRoot, list_groupSummaries)
     with (path_outputRoot / "batch_summary.json").open("w", encoding="utf-8") as obj_f:
         json_dump_safe(dict_batchSummary, obj_f)
+    save_primary_batch_histograms(
+        dict_batchSummary, path_outputRoot, str_lot=path_input.stem)
 
     print(
         f"[batch] done: {dict_batchSummary['num_img_ids']} groups, "

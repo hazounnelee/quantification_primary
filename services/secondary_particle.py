@@ -16,6 +16,7 @@ from core.schema import Sam2AspectRatioConfig, Sam2AspectRatioResult
 from services.sam2_service import Sam2AspectRatioService
 from utils.io import collect_input_groups
 from utils.metrics import calculate_mean_from_optional_values, calculate_percentage, json_dump_safe, pooled_stats
+from utils.histograms import save_secondary_batch_histograms
 
 # ── Secondary-specific constants ──────────────────────────────────────────────
 CONST_PARTICLE_AREA_THRESHOLD: float = 1500.0
@@ -378,6 +379,8 @@ def run_secondary_particle_analysis(
     dict_batchSummary = _build_batch_summary(path_input, path_outputRoot, list_groupSummaries)
     with (path_outputRoot / "batch_summary.json").open("w", encoding="utf-8") as obj_f:
         json_dump_safe(dict_batchSummary, obj_f)
+    save_secondary_batch_histograms(
+        dict_batchSummary, path_outputRoot, str_lot=path_input.stem)
     print(f"[batch] done: {dict_batchSummary['num_img_ids']} groups, "
           f"{dict_batchSummary['num_images']} images", flush=True)
     return dict_batchSummary
