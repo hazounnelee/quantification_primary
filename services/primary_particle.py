@@ -1105,7 +1105,8 @@ class PrimaryParticleService(Sam2AspectRatioService):
         dict_summary["roi"] = dict_roi
         dict_summary["measure_mode"] = "sam2"
         dict_summary["particle_mode"] = self.obj_primary_config.str_particleMode
-        dict_summary["roi_density"] = round(float((arr_roiBinary > 0).sum()) / arr_roiBinary.size, 4)
+        dict_summary["roi_density"] = round(
+            float((arr_roiBinary > 0).sum()) / arr_roiBinary.size if arr_roiBinary.size > 0 else 0.0, 4)
         dict_summary["num_tiles"] = dict_debug.get("num_tiles")
         dict_summary["num_candidate_points"] = dict_debug.get("num_candidate_points")
         dict_summary["num_accepted_masks"] = dict_debug.get("num_accepted_masks")
