@@ -1029,7 +1029,7 @@ _text(s, "Appendix  —  반응 시간에 따른 입도(등가직경) 증가",
       sz=Pt(18), bold=True, color=WHITE)
 _pgnum(s, 20)
 
-_text(s, "2차 입자(1차 전구체 구형체) 합성 시간에 따른 입자 크기 변화 측정 결과",
+_text(s, "1차 입자(구형 전구체) 합성 시간에 따른 입자 크기(등가직경) 변화 측정 결과",
       Inches(0.4), Inches(0.88), Inches(12.5), Inches(0.4), sz=Pt(13), color=MGRAY)
 
 # 그래프 영역
