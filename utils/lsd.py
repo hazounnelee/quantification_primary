@@ -40,7 +40,7 @@ def measure_perpendicular_thickness(
     float_px = -float_uy
     float_py = float_ux
     int_roiH, int_roiW = arr_gray.shape[:2]
-    int_half_scan = max(15, int(0.5 * float_px_per_um))
+    int_half_scan = max(40, int(2.0 * float_px_per_um))
     int_center = int_half_scan
     arr_scan = np.arange(-int_half_scan, int_half_scan + 1, dtype=np.float32)
     list_widths: tp.List[float] = []
@@ -337,10 +337,32 @@ def detect_acicular_lsd(
         obj_m, arr_mask = tpl_result
         list_objects.append(obj_m)
         list_masks.append(arr_mask)
-        cv2.line(arr_debug,
-                 (obj_m.int_bboxX, obj_m.int_bboxY),
-                 (obj_m.int_bboxX + obj_m.int_bboxWidth, obj_m.int_bboxY + obj_m.int_bboxHeight),
-                 (0, 255, 0) if obj_m.str_category == "acicular" else (0, 128, 255), 1)
+        tpl_color = (0, 255, 0) if obj_m.str_category == "acicular" else (0, 128, 255)
+        # 직사각형 윤곽선 (두께 포함)
+        float_angle_rad = np.radians(obj_m.float_minRectAngle)
+        float_cos = np.cos(float_angle_rad)
+        float_sin = np.sin(float_angle_rad)
+        float_half_l = obj_m.float_longAxisPx / 2.0
+        float_half_t = obj_m.float_thicknessPx / 2.0
+        float_cx = obj_m.float_centroidX
+        float_cy = obj_m.float_centroidY
+        arr_rect_pts = np.array([
+            [float_cx - float_cos * float_half_l + float_sin * float_half_t,
+             float_cy - float_sin * float_half_l - float_cos * float_half_t],
+            [float_cx + float_cos * float_half_l + float_sin * float_half_t,
+             float_cy + float_sin * float_half_l - float_cos * float_half_t],
+            [float_cx + float_cos * float_half_l - float_sin * float_half_t,
+             float_cy + float_sin * float_half_l + float_cos * float_half_t],
+            [float_cx - float_cos * float_half_l - float_sin * float_half_t,
+             float_cy - float_sin * float_half_l + float_cos * float_half_t],
+        ], dtype=np.int32)
+        cv2.polylines(arr_debug, [arr_rect_pts.reshape(-1, 1, 2)], True, tpl_color, 1)
+        # 장축 중심선
+        int_ax1 = int(round(float_cx - float_cos * float_half_l))
+        int_ay1 = int(round(float_cy - float_sin * float_half_l))
+        int_ax2 = int(round(float_cx + float_cos * float_half_l))
+        int_ay2 = int(round(float_cy + float_sin * float_half_l))
+        cv2.line(arr_debug, (int_ax1, int_ay1), (int_ax2, int_ay2), tpl_color, 1)
 
     print(f"[LSD] → 최종 {len(list_objects)}개  density={float_density:.3f}", flush=True)
     return list_objects, list_masks, arr_debug, dict_steps, float_density

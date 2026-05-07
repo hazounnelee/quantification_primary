@@ -23,9 +23,12 @@ def parse_magnification(str_or_num: tp.Optional[tp.Any]) -> tp.Optional[float]:
     if str_or_num is None:
         return None
     s = str(str_or_num).strip().lower()
-    if s.endswith("k"):
-        return float(s[:-1]) * 1000.0
-    return float(s)
+    try:
+        if s.endswith("k"):
+            return float(s[:-1]) * 1000.0
+        return float(s)
+    except ValueError:
+        raise ValueError(f"배율 형식을 인식할 수 없습니다: {str_or_num!r}  (예: 20000, '20k', '1.5k')")
 
 
 def mag_to_preset_key(float_mag: float) -> str:
