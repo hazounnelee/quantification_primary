@@ -2,6 +2,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import os
 import time
 import typing as tp
@@ -528,7 +529,8 @@ class PrimaryParticleService(Sam2AspectRatioService):
                 list_keptBboxes.append(tuple_box)
                 float_score: tp.Optional[float] = None
                 if arr_batchScores is not None and int_mi < len(arr_batchScores):
-                    float_score = float(arr_batchScores[int_mi])
+                    float_s = float(arr_batchScores[int_mi])
+                    float_score = None if math.isnan(float_s) else float_s
                 list_keptScores.append(float_score)
 
         arr_masks = (
@@ -683,7 +685,8 @@ class PrimaryParticleService(Sam2AspectRatioService):
                 list_keptBboxes.append(tuple_box)
                 float_sc: tp.Optional[float] = None
                 if arr_batchScores is not None and int_mi < len(arr_batchScores):
-                    float_sc = float(arr_batchScores[int_mi])
+                    float_s2 = float(arr_batchScores[int_mi])
+                    float_sc = None if math.isnan(float_s2) else float_s2
                 list_keptScores.append(float_sc)
 
         arr_masks = (
@@ -1185,7 +1188,8 @@ class PrimaryParticleService(Sam2AspectRatioService):
         for int_index, arr_mask in enumerate(arr_masks):
             float_conf: tp.Optional[float] = None
             if arr_scores is not None and int_index < len(arr_scores):
-                float_conf = float(arr_scores[int_index])
+                float_s3 = float(arr_scores[int_index])
+                float_conf = None if math.isnan(float_s3) else float_s3
 
             obj_m = self.measure_primary_mask(arr_mask, int_index, float_conf)
             if obj_m is None:

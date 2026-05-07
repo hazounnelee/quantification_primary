@@ -427,8 +427,8 @@ class Sam2AspectRatioService:
                     list_keptMasks.append(arr_roiMask)
                     list_keptBboxes.append(tuple_globalBox)
                     if arr_tileScores is not None and int_maskIdx < len(arr_tileScores):
-                        list_keptScores.append(
-                            float(arr_tileScores[int_maskIdx]))
+                        float_s = float(arr_tileScores[int_maskIdx])
+                        list_keptScores.append(None if math.isnan(float_s) else float_s)
                     else:
                         list_keptScores.append(None)
 
@@ -1146,7 +1146,8 @@ class Sam2AspectRatioService:
         for int_index, arr_mask in enumerate(arr_masks):
             float_confidence = None
             if arr_scores is not None and int_index < len(arr_scores):
-                float_confidence = float(arr_scores[int_index])
+                float_s = float(arr_scores[int_index])
+                float_confidence = None if math.isnan(float_s) else float_s
 
             obj_measurement = self.measure_mask(
                 arr_mask, int_index=int_index, float_confidence=float_confidence)
