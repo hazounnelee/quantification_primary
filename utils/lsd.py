@@ -301,10 +301,12 @@ def detect_acicular_lsd(
         ])
 
         int_bx, int_by, int_bw, int_bh = cv2.boundingRect(arr_corners.astype(np.int32))
+        int_x2 = int_bx + int_bw
+        int_y2 = int_by + int_bh
         int_bx = max(0, int_bx)
         int_by = max(0, int_by)
-        int_bw = min(int_bw, int_roiW - int_bx)
-        int_bh = min(int_bh, int_roiH - int_by)
+        int_bw = max(0, min(int_x2, int_roiW) - int_bx)
+        int_bh = max(0, min(int_y2, int_roiH) - int_by)
 
         if _is_bbox_near_edge(int_bx, int_by, int_bw, int_bh, int_roiW, int_roiH, int_edge_margin):
             return None
