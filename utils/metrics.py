@@ -89,7 +89,7 @@ class _SafeJSONEncoder(json.JSONEncoder):
             return _safe_float(obj)
         if isinstance(obj, dict):
             return {k: cls._sanitize(v) for k, v in obj.items()}
-        if isinstance(obj, list):
+        if isinstance(obj, (list, tuple)):
             return [cls._sanitize(v) for v in obj]
         if isinstance(obj, np.floating):
             return _safe_float(float(obj))
