@@ -497,7 +497,7 @@ _table(s, [
     ["OpenCV 지원",        "cv2.HoughLinesP",                         "cv2.createLineSegmentDetector(0)",          ""],
 ], Inches(0.35), Inches(1.38), Inches(12.6), Inches(4.1), fsz=Pt(11))
 
-_text(s, "▷  LSD 후처리: 방향각 차이 ≤ 10° · 수직 거리 ≤ 8px · 끝점 간격 ≤ 15px 이면 두 선분을 하나로 융합",
+_text(s, "▷  LSD 중복 제거: 중심 거리 < 12 px  AND  방향각 차이 < 25°  →  짧은 선분 제거 (긴 선분 우선 유지)",
       Inches(0.4), Inches(5.6), Inches(12.5), Inches(0.45), sz=Pt(12), color=NAVY)
 _text(s, "▷  두께 측정: 각 선분의 수직 방향으로 7개 샘플 → 중앙값(Median)으로 이상치 제거",
       Inches(0.4), Inches(6.1), Inches(12.5), Inches(0.45), sz=Pt(12), color=NAVY)
@@ -545,8 +545,8 @@ _box(s, ["이미지 전처리 흐름 (LSD 분기)"],
      Inches(0.35), Inches(4.2), Inches(12.6), Inches(0.48),
      fill=RGBColor(0x37, 0x47, 0x6F), fg=WHITE, sz=Pt(12), bold=True)
 
-flow = ["Gray 변환", "CLAHE", "이진화\n(Otsu/Adaptive)", "LSD 선분 검출",
-        "길이 필터\n(≥ 20px)", "선분 융합\n(Union-Find)", "두께 측정"]
+flow = ["Gray 변환", "CLAHE", "이진화\n(Otsu/Adaptive +\n자동 반전)", "LSD 선분 검출",
+        "중복 제거\n(dist<12px, Δang<25°)", "두께 측정\n(7샘플 중앙값)", "길이 필터\n(--min_length, 선택: --fuse)"]
 bw2, bh2 = Inches(1.55), Inches(0.65)
 xs = Inches(0.35)
 for i, step in enumerate(flow):

@@ -1759,7 +1759,7 @@ def build_primary_arg_parser() -> argparse.ArgumentParser:
     obj_parser.add_argument(
         "--fuse",
         action=argparse.BooleanOptionalAction, default=False,
-        help="겹치고 방향이 같은 컨투어를 하나로 융합한다 (Δangle < 10°, 겹침 ≥ 40%%). 기본값: OFF.",
+        help="겹치고 방향이 같은 컨투어를 하나로 융합한다 (Δangle < 15°, 겹침 ≥ 70%%). 기본값: OFF.",
     )
     obj_parser.add_argument(
         "--preprocess_width", type=lambda x: max(64, int(x)), default=1024,
