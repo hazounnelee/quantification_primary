@@ -1112,15 +1112,6 @@ class PrimaryParticleService(Sam2AspectRatioService):
 
         return PrimaryParticleResult(list_objects=list_objects, dict_summary=dict_summary)
 
-    def _mean_stat(self, str_key: str, str_stat: str, list_fileSummaries: tp.List[tp.Dict[str, tp.Any]]) -> tp.Optional[float]:
-        list_vals = [
-            d[str_key][str_stat]
-            for d in list_fileSummaries
-            if isinstance(d.get(str_key), dict)
-            and d[str_key].get(str_stat) is not None
-        ]
-        return calculate_mean_from_optional_values(list_vals)
-
     @classmethod
     def _create_config(
         cls,
