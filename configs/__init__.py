@@ -1,10 +1,12 @@
 from __future__ import annotations
+import threading
 import typing as tp
 from pathlib import Path
 import yaml
 
 _PRESETS_PATH = Path(__file__).parent / "presets.yaml"
 _PRESETS: tp.Optional[tp.Dict[str, tp.Any]] = None
+_PRESETS_LOCK = threading.Lock()
 
 _PATHS_KEYS = {"input", "output_dir", "model", "model_cfg", "device"}
 
@@ -42,8 +44,10 @@ def mag_to_preset_key(float_mag: float) -> str:
 def _load() -> tp.Dict[str, tp.Any]:
     global _PRESETS
     if _PRESETS is None:
-        with _PRESETS_PATH.open(encoding="utf-8") as f:
-            _PRESETS = yaml.safe_load(f)
+        with _PRESETS_LOCK:
+            if _PRESETS is None:
+                with _PRESETS_PATH.open(encoding="utf-8") as f:
+                    _PRESETS = yaml.safe_load(f) or {}
     return _PRESETS
 
 
