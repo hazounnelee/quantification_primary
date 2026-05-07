@@ -1583,7 +1583,7 @@ def build_primary_arg_parser() -> argparse.ArgumentParser:
 
     # 입출력 / 모델
     obj_parser.add_argument(
-        "--input", default="img/primary_test.jpg",
+        "--input", default="img/synthetic_primary.jpg",
         help="입력 이미지 또는 디렉터리 경로")
     obj_parser.add_argument(
         "--output_dir", default=f"out_primary_{str_ts}",

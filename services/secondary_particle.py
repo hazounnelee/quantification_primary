@@ -390,7 +390,7 @@ def build_secondary_arg_parser() -> argparse.ArgumentParser:
         description="SAM2로 2차 입자를 분할하고 particle/fragment 분류, 종횡비, 구형도를 측정합니다.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    obj_parser.add_argument("--input", default="img/secondary_test.jpg",
+    obj_parser.add_argument("--input", default="img/synthetic_secondary.jpg",
                             help="입력 이미지 또는 디렉터리 경로")
     obj_parser.add_argument("--output_dir", default=f"out_secondary_{str_ts}",
                             help="결과 저장 폴더")
