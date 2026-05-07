@@ -1099,6 +1099,8 @@ class PrimaryParticleService(Sam2AspectRatioService):
         dict_summary = self.build_primary_summary(list_objects)
         arr_roiGray = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
         _, arr_roiBinary = cv2.threshold(arr_roiGray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        if arr_roiBinary.size > 0 and float((arr_roiBinary > 0).sum()) / arr_roiBinary.size > 0.55:
+            arr_roiBinary = cv2.bitwise_not(arr_roiBinary)
 
         dict_summary["roi"] = dict_roi
         dict_summary["measure_mode"] = "sam2"
