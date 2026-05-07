@@ -85,8 +85,8 @@ def _build_img_id_summary(
     list_fine_ratios: tp.List[float] = []
     list_times: tp.List[float] = []
     for d in list_fileSummaries:
-        list_pooled_sphs.extend(d.get("particle_sphericity_raw", []))
-        list_pooled_sizes.extend(d.get("particle_size_um_raw", []))
+        list_pooled_sphs.extend(d.get("particle_sphericity_raw") or [])
+        list_pooled_sizes.extend(d.get("particle_size_um_raw") or [])
         if d.get("fine_particle_ratio_percent") is not None:
             list_fine_ratios.append(float(d["fine_particle_ratio_percent"]))
         if d.get("processing_time_sec") is not None:
@@ -134,9 +134,9 @@ def _build_batch_summary(
     list_all_fine_ratios: tp.List[float] = []
     list_all_times: tp.List[float] = []
     for g in list_groupSummaries:
-        list_all_sphs.extend(g.get("particle_sphericity_raw", []))
-        list_all_sizes.extend(g.get("particle_size_um_raw", []))
-        for f in g.get("files", []):
+        list_all_sphs.extend(g.get("particle_sphericity_raw") or [])
+        list_all_sizes.extend(g.get("particle_size_um_raw") or [])
+        for f in g.get("files") or []:
             if f.get("fine_particle_ratio_percent") is not None:
                 list_all_fine_ratios.append(float(f["fine_particle_ratio_percent"]))
             if f.get("processing_time_sec") is not None:

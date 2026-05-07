@@ -1379,7 +1379,7 @@ def build_primary_img_id_summary(
 
     list_pooled_thickness: tp.List[float] = []
     for d in list_fileSummaries:
-        list_pooled_thickness.extend(d.get("all_primary_thickness_um_raw", []))
+        list_pooled_thickness.extend(d.get("all_primary_thickness_um_raw") or [])
 
     list_densities = [d["roi_density"] for d in list_fileSummaries if d.get("roi_density") is not None]
     list_times = [d["processing_time_sec"] for d in list_fileSummaries if d.get("processing_time_sec") is not None]
@@ -1429,8 +1429,8 @@ def build_primary_batch_summary(
     list_all_densities: tp.List[float] = []
     list_all_times: tp.List[float] = []
     for g in list_groupSummaries:
-        list_all_thickness.extend(g.get("all_primary_thickness_um_raw", []))
-        for f in g.get("files", []):
+        list_all_thickness.extend(g.get("all_primary_thickness_um_raw") or [])
+        for f in g.get("files") or []:
             if f.get("roi_density") is not None:
                 list_all_densities.append(float(f["roi_density"]))
             if f.get("processing_time_sec") is not None:
