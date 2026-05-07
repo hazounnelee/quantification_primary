@@ -316,7 +316,7 @@ class Sam2AspectRatioService:
                     float_qualityLevel=self.obj_config.float_pointQualityLevel,
                 )
                 list_promptBatches = list(iter_chunks(
-                    list_points, self.obj_config.int_pointBatchSize))
+                    list_points, max(1, self.obj_config.int_pointBatchSize)))
 
                 for int_px, int_py in list_points:
                     int_candidateCount += 1

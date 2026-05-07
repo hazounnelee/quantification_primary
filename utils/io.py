@@ -9,6 +9,7 @@ CONST_SUPPORTED_IMAGE_SUFFIXES: tp.Tuple[str, ...] = (
 
 def iter_chunks(lst: tp.List[tp.Any], int_n: int) -> tp.Iterator[tp.List[tp.Any]]:
     """Yield successive n-sized chunks from lst."""
+    int_n = max(1, int_n)
     for int_i in range(0, len(lst), int_n):
         yield lst[int_i: int_i + int_n]
 
