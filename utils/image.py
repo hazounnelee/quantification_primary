@@ -95,8 +95,9 @@ def create_processing_tiles(
     int_roiH = int_y2 - int_y1
     if int_roiW <= 0 or int_roiH <= 0:
         return list_tiles
-    int_tileW = min(int_tileSize, int_roiW)
-    int_tileH = min(int_tileSize, int_roiH)
+    int_stride = max(1, int_stride)
+    int_tileW = min(max(1, int_tileSize), int_roiW)
+    int_tileH = min(max(1, int_tileSize), int_roiH)
     int_y = 0
     while int_y < int_roiH:
         int_x = 0

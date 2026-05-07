@@ -2,6 +2,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import os
 import time
 import typing as tp
 from concurrent.futures import ThreadPoolExecutor
@@ -332,7 +333,10 @@ def run_secondary_particle_analysis(
             finally:
                 obj_gpu_queue.put(obj_gpu)
 
-        int_workers = len(list_gpu_services)
+        # OpenCV 모드는 GPU 불필요 → CPU 코어 수만큼 병렬 처리
+        int_workers = (
+            min(os.cpu_count() or 4, 8) if bool_useOpenCV else len(list_gpu_services)
+        )
         list_fileSummaries: tp.List[tp.Dict[str, tp.Any]]
         if int_workers == 1:
             list_fileSummaries = [
