@@ -828,10 +828,6 @@ class PrimaryParticleService(Sam2AspectRatioService):
         # --- 하단 통계 바 ---
         list_t = [o.float_thicknessUm for o in list_objects if o.str_category in ("acicular", "plate")]
         int_count = len(list_t)
-        str_stats = (
-            f"N={int_count}"
-            f"  mean={np.mean(list_t):.3f}um" if list_t else f"N={int_count}"
-        )
         if list_t:
             str_stats = (
                 f"N={int_count}"
@@ -839,6 +835,8 @@ class PrimaryParticleService(Sam2AspectRatioService):
                 f"  median={float(np.median(list_t)):.3f}um"
                 f"  std={float(np.std(list_t)):.3f}um"
             )
+        else:
+            str_stats = f"N={int_count}"
         if float_density is not None:
             str_stats += f"  density={float_density:.3f}"
 
