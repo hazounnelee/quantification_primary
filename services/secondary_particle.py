@@ -369,6 +369,10 @@ def run_secondary_particle_analysis(
                 ]
 
         dict_groupSummary = _build_img_id_summary(str_groupId, path_outputRoot, list_fileSummaries)
+        dict_groupSummary["num_images_attempted"] = len(list_imagePaths)
+        int_failed = len(list_imagePaths) - len(list_fileSummaries)
+        if int_failed > 0:
+            print(f"[batch][group {str_groupId}] {int_failed}개 이미지 처리 실패", flush=True)
         path_groupDir = path_outputRoot / str_groupId
         path_groupDir.mkdir(parents=True, exist_ok=True)
         with (path_groupDir / "img_id_summary.json").open("w", encoding="utf-8") as obj_f:

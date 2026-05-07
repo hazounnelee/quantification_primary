@@ -1111,8 +1111,7 @@ class Sam2AspectRatioService:
             arr_raw_masks=arr_raw_masks,
         )
 
-        # ── 파이프라인 단계별 이미지 저장 ────────────────────────────────────
-        self.obj_config.path_outputDir.mkdir(parents=True, exist_ok=True)
+        # ── 파이프라인 단계별 이미지 저장 (save_outputs에서 이미 디렉토리 생성됨) ──
         cv2.imwrite(str(self.obj_config.path_outputDir / "pipeline_clahe.png"), arr_clahe)
         cv2.imwrite(str(self.obj_config.path_outputDir / "pipeline_binary.png"), arr_binary)
         arr_dist_viz = cv2.normalize(arr_dist, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
