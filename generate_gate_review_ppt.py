@@ -345,7 +345,7 @@ for i, (label, bg, fg) in enumerate(prep_steps):
         _text(s, "→", xl + bw + Inches(0.06), Inches(4.72), Inches(0.42), Inches(0.4),
               sz=Pt(20), bold=True, color=NAVY, align=PP_ALIGN.CENTER)
 
-_text(s, "※ 스케일 기준:  20k × →  147 px = 1 µm     |     50k × →  371 px = 1 µm",
+_text(s, "※ 스케일 기준 (default --preprocess_width 1024):  20k ×  →  74 px = 1 µm     |     50k ×  →  185 px = 1 µm",
       Inches(0.4), Inches(5.6), Inches(12.5), Inches(0.4),
       sz=Pt(12), color=MGRAY)
 

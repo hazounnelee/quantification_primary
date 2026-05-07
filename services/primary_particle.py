@@ -1638,7 +1638,7 @@ def build_primary_arg_parser() -> argparse.ArgumentParser:
     # 스케일 (SEM 이미지 배율에 맞게 설정 필요)
     obj_parser.add_argument(
         "--scale_pixels", type=float, default=CONST_SCALE_PIXELS,
-        help="스케일 기준 pixel 수. 20k=147, 50k=371")
+        help="스케일 기준 pixel 수. 20k@1024=74, 50k@1024=185  (preprocess_width에 비례 자동 조정)")
     obj_parser.add_argument(
         "--scale_um", type=float, default=CONST_SCALE_MICROMETERS,
         help="스케일 기준 µm 값. 20k=1, 50k=1 (기본 단위: 1 µm)")
