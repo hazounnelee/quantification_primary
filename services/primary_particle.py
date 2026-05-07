@@ -88,7 +88,6 @@ CONST_ACICULAR_CANDIDATE_MIN_AREA: float = 60.0
 CONST_ACICULAR_CANDIDATE_MAX_AREA: float = 25000.0
 CONST_ACICULAR_CANDIDATE_AR_SCREEN: float = 0.60
 CONST_ACICULAR_BBOX_PAD_RATIO: float = 0.08
-CONST_ACICULAR_BOX_PROMPT_BATCH: int = 16
 CONST_ACICULAR_FALLBACK_THRESHOLD: int = 3
 
 # Sam2AspectRatioConfig 기본값에서 가져온 공통 상수
@@ -431,127 +430,6 @@ class PrimaryParticleService(Sam2AspectRatioService):
     # ----------------------------------------------------------
     # 침상 hybrid: SAM2 box prompt 추론
     # ----------------------------------------------------------
-
-    def predict_with_box_prompts(
-        self,
-        arr_roi: np.ndarray,
-        list_boxes: tp.List[tp.Tuple[int, int, int, int]],
-    ) -> tp.Tuple[np.ndarray, tp.Optional[np.ndarray], tp.Dict[str, tp.Any]]:
-        """SAM2 bounding box prompt 방식으로 ROI 전체에 대해 mask를 추론한다.
-
-        Args:
-            arr_roi: ROI BGR 이미지.
-            list_boxes: (x1, y1, x2, y2) 형식의 bbox 목록.
-
-        Returns:
-            (arr_masks, arr_scores, dict_debug) — predict_tiled_point_prompts와 동일 형식.
-        """
-        if self.obj_model is None:
-            self.initialize_model()
-
-        int_roiH, int_roiW = arr_roi.shape[:2]
-
-        dict_predictCommon: tp.Dict[str, tp.Any] = {
-            "imgsz": self.obj_config.int_imgSize,
-            "retina_masks": self.obj_config.bool_retinaMasks,
-            "verbose": False,
-        }
-        if self.obj_config.str_device:
-            dict_predictCommon["device"] = self.obj_config.str_device
-
-        list_keptMasks: tp.List[np.ndarray] = []
-        list_keptScores: tp.List[tp.Optional[float]] = []
-        list_keptBboxes: tp.List[tp.Tuple[int, int, int, int]] = []
-        int_acceptedCount = 0
-        int_bboxDedupRejected = 0
-
-        int_bs = max(1, CONST_ACICULAR_BOX_PROMPT_BATCH)
-        for int_start in range(0, len(list_boxes), int_bs):
-            list_batch = list_boxes[int_start:int_start + int_bs]
-            list_bboxForSam = [[x1, y1, x2, y2] for (x1, y1, x2, y2) in list_batch]
-
-            try:
-                list_results = self.obj_model(  # type: ignore[misc]
-                    source=arr_roi,
-                    bboxes=list_bboxForSam,
-                    **dict_predictCommon,
-                )
-            except Exception as exc:
-                print(f"[WARN] box prompt batch 실패 (skip): {exc}", flush=True)
-                continue
-
-            if not list_results:
-                continue
-
-            obj_result = list_results[0]
-            if obj_result.masks is None or obj_result.masks.data is None:
-                continue
-
-            arr_batchMasks = obj_result.masks.data.detach().cpu().numpy()
-            arr_batchScores = None
-            if obj_result.boxes is not None and obj_result.boxes.conf is not None:
-                arr_batchScores = obj_result.boxes.conf.detach().cpu().numpy()
-
-            for int_mi, arr_rawMask in enumerate(arr_batchMasks):
-                arr_mask = (
-                    arr_rawMask > self.obj_config.float_maskBinarizeThreshold
-                ).astype(np.uint8)
-                if int(arr_mask.sum()) < self.obj_config.int_minValidMaskArea:
-                    continue
-
-                arr_contour = self.extract_largest_contour(arr_mask)
-                if arr_contour is None:
-                    continue
-
-                int_bx, int_by, int_bw, int_bh = cv2.boundingRect(arr_contour)
-                if self.is_bbox_near_roi_edge(
-                        int_bx, int_by, int_bw, int_bh, int_roiW, int_roiH):
-                    continue
-
-                tuple_box = (int_bx, int_by, int_bw, int_bh)
-                bool_bboxDup = any(
-                    calculate_box_iou(tuple_box, prev) >= self.obj_config.float_bboxDedupIou
-                    for prev in list_keptBboxes
-                )
-                if bool_bboxDup:
-                    int_bboxDedupRejected += 1
-                    continue
-
-                bool_maskDup = any(
-                    calculate_binary_iou(arr_mask, prev) >= self.obj_config.float_dedupIou
-                    for prev in list_keptMasks
-                )
-                if bool_maskDup:
-                    continue
-
-                int_acceptedCount += 1
-                list_keptMasks.append(arr_mask)
-                list_keptBboxes.append(tuple_box)
-                float_score: tp.Optional[float] = None
-                if arr_batchScores is not None and int_mi < len(arr_batchScores):
-                    float_s = float(arr_batchScores[int_mi])
-                    float_score = None if math.isnan(float_s) else float_s
-                list_keptScores.append(float_score)
-
-        arr_masks = (
-            np.stack(list_keptMasks, axis=0).astype(np.uint8)
-            if list_keptMasks
-            else np.empty((0, int_roiH, int_roiW), dtype=np.uint8)
-        )
-        arr_scores: tp.Optional[np.ndarray] = None
-        if list_keptScores:
-            arr_scores = np.array(
-                [np.nan if x is None else float(x) for x in list_keptScores],
-                dtype=np.float32,
-            )
-        dict_debug: tp.Dict[str, tp.Any] = {
-            "num_tiles": 1,
-            "num_candidate_boxes": len(list_boxes),
-            "num_candidate_points": 0,
-            "num_accepted_masks": int_acceptedCount,
-            "num_bbox_dedup_rejected": int_bboxDedupRejected,
-        }
-        return arr_masks, arr_scores, dict_debug
 
     def _merge_mask_results(
         self,
