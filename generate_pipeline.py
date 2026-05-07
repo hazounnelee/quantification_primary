@@ -106,9 +106,10 @@ def draw_primary():
 
     # ── Preprocessing ──────────────────────────────────────────────────────────
     box(ax, XC, 26.2, BW, 0.95,
-        "IMAGE NORMALISATION\n"
-        "resize → 2048 × 1636  (bilinear)    ·    crop bottom 100 px  →  2048 × 1536",
-        color=C_PREP, fs=8)
+        "IMAGE NORMALISATION  (--preprocess_width W,  default 1024)\n"
+        "resize → W × round(W×1636/2048)  (bilinear)    ·    crop bottom round(W×100/2048) px\n"
+        "default:  1024 × 818  →  crop 50 px  →  1024 × 768",
+        color=C_PREP, fs=7.5)
     arr(ax, XC, 25.72, XC, 25.15)
     sep(24.9)
 
@@ -349,8 +350,9 @@ def draw_secondary():
 
     # Preprocessing
     box(ax, XC, 18.3, BW, BH,
-        "IMAGE NORMALISATION\n"
-        "resize → 2048 × 1636  (bilinear)   ·   crop bottom 100 px  →  2048 × 1536",
+        "IMAGE NORMALISATION  (--preprocess_width W,  default 1024)\n"
+        "resize → W × round(W×1636/2048)  (bilinear)   ·   crop bottom round(W×100/2048) px\n"
+        "default:  1024 × 818  →  crop 50 px  →  1024 × 768",
         color=C_PREP, fs=8)
     dn(17.8, 17.25); sep(17.05)
 
