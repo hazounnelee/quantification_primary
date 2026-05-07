@@ -3,13 +3,12 @@ import argparse
 import csv
 import json
 import os
-import sys
 import time
 import typing as tp
 from concurrent.futures import ThreadPoolExecutor
 
 from tqdm import tqdm
-from dataclasses import asdict
+from dataclasses import asdict, replace as dataclasses_replace
 from datetime import datetime
 from pathlib import Path
 
@@ -24,7 +23,6 @@ from core.schema import (
     PrimaryParticleMeasurement,
     PrimaryParticleResult,
 )
-from configs import get_analysis_preset
 from utils.metrics import convert_pixels_to_micrometers, calculate_mean_from_optional_values, calculate_percentage, json_default
 from utils.image import detect_sphere_roi, compute_center_roi, compute_adaptive_block_size, draw_label_no_overlap
 from utils.lsd import detect_acicular_lsd
@@ -126,9 +124,8 @@ class PrimaryParticleService(Sam2AspectRatioService):
 
     def __init__(self, obj_config: PrimaryParticleConfig) -> None:
         super().__init__(obj_config)  # self.obj_config = scale_pixels 보정된 config
-        import dataclasses
         float_factor = obj_config.int_preprocessWidth / CONST_SCALE_REFERENCE_WIDTH
-        self.obj_primary_config: PrimaryParticleConfig = dataclasses.replace(
+        self.obj_primary_config: PrimaryParticleConfig = dataclasses_replace(
             self.obj_config,
             int_lsdMinLengthPx=round(obj_config.int_lsdMinLengthPx * float_factor),
         )
