@@ -112,6 +112,24 @@ class Sam2AspectRatioService:
             "config_preview": str_rawText[:200].strip(),
         }
 
+    # Canonical name lookup (alias map is duplicated here intentionally so that
+    # the pure-name query in build_summary has no file-system side effects)
+    _DICT_ALIAS_NAMES: tp.ClassVar[tp.Dict[str, str]] = {
+        "sam2_hiera_tiny.pt": "sam2_t.pt",
+        "sam2_hiera_small.pt": "sam2_s.pt",
+        "sam2_hiera_base_plus.pt": "sam2_b.pt",
+        "sam2_hiera_large.pt": "sam2_l.pt",
+        "sam2.1_hiera_tiny.pt": "sam2.1_t.pt",
+        "sam2.1_hiera_small.pt": "sam2.1_s.pt",
+        "sam2.1_hiera_base_plus.pt": "sam2.1_b.pt",
+        "sam2.1_hiera_large.pt": "sam2.1_l.pt",
+    }
+
+    def _canonical_weights_name(self) -> str:
+        """Return the Ultralytics-canonical filename without touching the filesystem."""
+        name = self.obj_config.path_modelWeights.name
+        return self._DICT_ALIAS_NAMES.get(name, name)
+
     def resolve_model_weights_path(self) -> Path:
         """
         Ultralytics가 요구하는 SAM2 파일명 alias로 가중치 경로를 정규화.
@@ -821,7 +839,7 @@ class Sam2AspectRatioService:
             "model_weights_path": str(self.obj_config.path_modelWeights),
             "model_weights_resolved_name": (
                 None if self.obj_config.bool_useOpenCV
-                else self.resolve_model_weights_path().name
+                else self._canonical_weights_name()
             ),
             "model_name": (
                 "opencv" if self.obj_config.bool_useOpenCV
