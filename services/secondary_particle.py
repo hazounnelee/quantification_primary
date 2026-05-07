@@ -308,6 +308,22 @@ def run_secondary_particle_analysis(
     for str_groupId, list_imagePaths in tqdm(list_inputGroups, desc="groups", unit="group"):
 
         def _run_image(path_image: Path) -> tp.Optional[tp.Dict[str, tp.Any]]:
+            if bool_useOpenCV:
+                # OpenCV 모드: 모델 공유 불필요 → 큐 경합 없이 독립 실행
+                try:
+                    obj_service = Sam2AspectRatioService(_create_config(str_groupId, path_image))
+                    float_t0 = time.perf_counter()
+                    obj_result = obj_service.process()
+                    dict_fs = dict(obj_result.dict_summary)
+                    dict_fs["img_id"] = str_groupId
+                    dict_fs["image_name"] = path_image.name
+                    dict_fs["image_path"] = str(path_image)
+                    dict_fs["processing_time_sec"] = round(time.perf_counter() - float_t0, 3)
+                    return dict_fs
+                except Exception as exc:
+                    print(f"[WARN] {path_image.name} 처리 실패 (skip): {exc}", flush=True)
+                    return None
+            # SAM2 모드: GPU 큐에서 모델 인스턴스 빌림
             obj_gpu = obj_gpu_queue.get()
             try:
                 obj_service = Sam2AspectRatioService(
@@ -316,9 +332,8 @@ def run_secondary_particle_analysis(
                         str_device=obj_gpu.obj_config.str_device,
                     )
                 )
-                if not bool_useOpenCV:
-                    obj_service.obj_model = obj_gpu.obj_model
-                    obj_service.dict_modelConfig = dict(obj_gpu.dict_modelConfig)
+                obj_service.obj_model = obj_gpu.obj_model
+                obj_service.dict_modelConfig = dict(obj_gpu.dict_modelConfig)
                 float_t0 = time.perf_counter()
                 obj_result = obj_service.process()
                 dict_fs = dict(obj_result.dict_summary)
@@ -333,7 +348,6 @@ def run_secondary_particle_analysis(
             finally:
                 obj_gpu_queue.put(obj_gpu)
 
-        # OpenCV 모드는 GPU 불필요 → CPU 코어 수만큼 병렬 처리
         int_workers = (
             min(os.cpu_count() or 4, 8) if bool_useOpenCV else len(list_gpu_services)
         )
