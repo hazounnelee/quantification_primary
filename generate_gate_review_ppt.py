@@ -129,7 +129,11 @@ def _arrow_v(s, cx, y1, y2, color=MGRAY, w=Pt(1.5)):
     conn.line.color.rgb = color
     conn.line.width = w
     spPr = conn._element.spPr
-    ln = etree.SubElement(spPr, qn('a:ln'))
+    # Reuse the existing a:ln element (created by conn.line.color.rgb above)
+    # to avoid a duplicate a:ln that would cause tailEnd to be ignored.
+    ln = spPr.find(qn('a:ln'))
+    if ln is None:
+        ln = etree.SubElement(spPr, qn('a:ln'))
     te = etree.SubElement(ln, qn('a:tailEnd'))
     te.set('type', 'arrow')
     te.set('w', 'med')
