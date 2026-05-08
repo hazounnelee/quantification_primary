@@ -176,7 +176,13 @@ class Sam2AspectRatioService:
         try:
             os.link(path_weights, path_alias)
         except OSError:
-            shutil.copy2(path_weights, path_alias)
+            try:
+                shutil.copy2(path_weights, path_alias)
+            except OSError as exc:
+                raise RuntimeError(
+                    f"모델 가중치를 복사할 수 없습니다: {path_weights} → {path_alias}\n"
+                    f"디스크 공간 또는 권한을 확인하세요. 원인: {exc}"
+                ) from exc
 
         return path_alias
 

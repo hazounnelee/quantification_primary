@@ -31,7 +31,16 @@ def calculate_mean_from_optional_values(
     list_values: tp.Iterable[tp.Optional[float]],
 ) -> tp.Optional[float]:
     """Return mean of non-None, non-NaN values, or None if no valid values."""
-    valid = [v for v in list_values if v is not None and not math.isnan(float(v))]
+    valid = []
+    for v in list_values:
+        if v is None:
+            continue
+        try:
+            fv = float(v)
+            if not math.isnan(fv):
+                valid.append(fv)
+        except (TypeError, ValueError):
+            pass
     return float(np.mean(valid)) if valid else None
 
 
