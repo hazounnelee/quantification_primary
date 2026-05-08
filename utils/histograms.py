@@ -271,6 +271,28 @@ def save_secondary_batch_histograms(
     )
 
 
+def _iqr_xlim(
+    list_vals: tp.List[float],
+    float_k: float = 2.0,
+    float_hard_min: tp.Optional[float] = None,
+    float_hard_max: tp.Optional[float] = None,
+) -> tp.Tuple[tp.Optional[float], tp.Optional[float]]:
+    """Return (xmin, xmax) clipped to Q1 - k*IQR … Q3 + k*IQR."""
+    if len(list_vals) < 4:
+        return float_hard_min, float_hard_max
+    arr = np.array(list_vals, dtype=np.float64)
+    float_q1 = float(np.percentile(arr, 25))
+    float_q3 = float(np.percentile(arr, 75))
+    float_iqr = float_q3 - float_q1
+    float_lo = float_q1 - float_k * float_iqr
+    float_hi = float_q3 + float_k * float_iqr
+    if float_hard_min is not None:
+        float_lo = max(float_lo, float_hard_min)
+    if float_hard_max is not None:
+        float_hi = min(float_hi, float_hard_max)
+    return float_lo, float_hi
+
+
 def save_primary_batch_histograms(
     dict_batchSummary: tp.Dict[str, tp.Any],
     path_outputDir: Path,
@@ -290,17 +312,30 @@ def save_primary_batch_histograms(
                 list_thickness.append(fv)
         except (TypeError, ValueError):
             pass
+
+    # density: prefer pre-pooled raw list, fall back to img_id file traversal
     list_densities: tp.List[float] = []
-    for dict_g in (dict_batchSummary.get("img_ids") or []):
-        for dict_f in (dict_g.get("files") or []):
-            v = dict_f.get("roi_density")
-            if v is not None:
-                try:
-                    fv = float(v)
-                    if not math.isnan(fv):
-                        list_densities.append(fv)
-                except (TypeError, ValueError):
-                    pass
+    for v in (dict_batchSummary.get("roi_density_raw") or []):
+        try:
+            fv = float(v)
+            if not math.isnan(fv):
+                list_densities.append(fv)
+        except (TypeError, ValueError):
+            pass
+    if not list_densities:
+        for dict_g in (dict_batchSummary.get("img_ids") or []):
+            for dict_f in (dict_g.get("files") or []):
+                v = dict_f.get("roi_density")
+                if v is not None:
+                    try:
+                        fv = float(v)
+                        if not math.isnan(fv):
+                            list_densities.append(fv)
+                    except (TypeError, ValueError):
+                        pass
+
+    float_density_xmin, float_density_xmax = _iqr_xlim(
+        list_densities, float_k=2.0, float_hard_min=0.0, float_hard_max=1.0)
 
     _save_batch_hist(
         list_vals=list_thickness,
@@ -317,5 +352,6 @@ def save_primary_batch_histograms(
         str_xlabel="ROI Density (foreground fraction)",
         str_color="#ff8844",
         str_unit="",
-        float_xlim_min=0.0, float_xlim_max=1.0,
+        float_xlim_min=float_density_xmin,
+        float_xlim_max=float_density_xmax,
     )

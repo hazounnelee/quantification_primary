@@ -363,7 +363,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
             compute_adaptive_block_size(int_roiH, int_roiW, 25, CONST_ACICULAR_ADAPT_BLOCK_SIZE),
             CONST_ACICULAR_ADAPT_C,
         )
-        if float(arr_thresh.sum()) / (255.0 * int_roiH * int_roiW) > 0.55:
+        if int_roiH * int_roiW > 0 and float(arr_thresh.sum()) / (255.0 * int_roiH * int_roiW) > 0.55:
             arr_thresh = cv2.bitwise_not(arr_thresh)
 
         # 3. Erosion — 서로 붙어있는 입자 경계를 끊어 개별 blob으로 분리
@@ -1114,8 +1114,6 @@ class PrimaryParticleService(Sam2AspectRatioService):
         dict_summary = self.build_primary_summary(list_objects)
         arr_roiGray = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
         _, arr_roiBinary = cv2.threshold(arr_roiGray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        if arr_roiBinary.size > 0 and float((arr_roiBinary > 0).sum()) / arr_roiBinary.size > 0.55:
-            arr_roiBinary = cv2.bitwise_not(arr_roiBinary)
 
         dict_summary["roi"] = dict_roi
         dict_summary["measure_mode"] = "sam2"
@@ -1352,8 +1350,10 @@ def build_primary_batch_summary(
         "all_primary_thickness_um_mean": calculate_mean_from_optional_values(
             d.get("all_primary_thickness_um_mean") for d in list_groupSummaries),
         "all_primary_thickness_um": pooled_stats(list_all_thickness),
+        "all_primary_thickness_um_raw": list_all_thickness,
         "roi_density_mean": calculate_mean_from_optional_values(list_all_densities),
         "roi_density": pooled_stats(list_all_densities),
+        "roi_density_raw": list_all_densities,
         "processing_time_sec": pooled_stats(list_all_times),
         "img_ids": list_groupSummaries,
     }
