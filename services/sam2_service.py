@@ -322,12 +322,16 @@ class Sam2AspectRatioService:
             if self.obj_config.bool_usePointPrompts:
                 arr_tileGray = arr_inputGray[int_ty1:int_ty2,
                                              int_tx1:int_tx2].copy()
-                list_points = sample_interest_points(
-                    arr_tileGray=arr_tileGray,
-                    int_maxPoints=self.obj_config.int_pointsPerTile,
-                    int_minDist=self.obj_config.int_pointMinDistance,
-                    float_qualityLevel=self.obj_config.float_pointQualityLevel,
-                )
+                try:
+                    list_points = sample_interest_points(
+                        arr_tileGray=arr_tileGray,
+                        int_maxPoints=self.obj_config.int_pointsPerTile,
+                        int_minDist=self.obj_config.int_pointMinDistance,
+                        float_qualityLevel=self.obj_config.float_pointQualityLevel,
+                    )
+                except Exception as exc:
+                    print(f"[WARN] tile {int_tileIdx} 포인트 추출 실패 (skip): {exc}", flush=True)
+                    list_points = []
                 list_promptBatches = list(iter_chunks(
                     list_points, max(1, self.obj_config.int_pointBatchSize)))
 
@@ -352,21 +356,25 @@ class Sam2AspectRatioService:
             )
 
             for list_pointChunk in list_promptBatches:
-                if self.obj_config.bool_usePointPrompts:
-                    if len(list_pointChunk) == 0:
-                        continue
-                    list_results = self.obj_model(  # type: ignore[misc]
-                        source=arr_tileBgr,
-                        points=[[int_px, int_py]
-                                for int_px, int_py in list_pointChunk],
-                        labels=[1] * len(list_pointChunk),
-                        **dict_predictCommon,
-                    )
-                else:
-                    list_results = self.obj_model(  # type: ignore[misc]
-                        source=arr_tileBgr,
-                        **dict_predictCommon,
-                    )
+                try:
+                    if self.obj_config.bool_usePointPrompts:
+                        if len(list_pointChunk) == 0:
+                            continue
+                        list_results = self.obj_model(  # type: ignore[misc]
+                            source=arr_tileBgr,
+                            points=[[int_px, int_py]
+                                    for int_px, int_py in list_pointChunk],
+                            labels=[1] * len(list_pointChunk),
+                            **dict_predictCommon,
+                        )
+                    else:
+                        list_results = self.obj_model(  # type: ignore[misc]
+                            source=arr_tileBgr,
+                            **dict_predictCommon,
+                        )
+                except Exception as exc:
+                    print(f"[WARN] tile {int_tileIdx} 추론 실패 (skip): {exc}", flush=True)
+                    continue
                 if not list_results:
                     continue
 
