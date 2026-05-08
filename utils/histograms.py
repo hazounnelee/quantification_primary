@@ -213,16 +213,26 @@ def save_secondary_batch_histograms(
     """
     str_prefix = f"{str_lot}  " if str_lot else ""
 
-    list_sizes: tp.List[float] = [
-        v for v in (dict_batchSummary.get("particle_size_um_raw") or [])
-        if not math.isnan(float(v))
-    ]
-    list_sphs: tp.List[float] = [
-        v for v in (dict_batchSummary.get("particle_sphericity_raw") or [])
-        if not math.isnan(float(v))
-    ]
+    # Raw values live in img_id summaries (particle_size_um_raw / particle_sphericity_raw)
+    # which are pooled at the group level, not stored at the batch level.
+    list_sizes: tp.List[float] = []
+    list_sphs: tp.List[float] = []
     list_fine: tp.List[float] = []
     for dict_g in (dict_batchSummary.get("img_ids") or []):
+        for v in (dict_g.get("particle_size_um_raw") or []):
+            try:
+                fv = float(v)
+                if not math.isnan(fv):
+                    list_sizes.append(fv)
+            except (TypeError, ValueError):
+                pass
+        for v in (dict_g.get("particle_sphericity_raw") or []):
+            try:
+                fv = float(v)
+                if not math.isnan(fv):
+                    list_sphs.append(fv)
+            except (TypeError, ValueError):
+                pass
         for dict_f in (dict_g.get("files") or []):
             v = dict_f.get("fine_particle_ratio_percent")
             if v is not None:
