@@ -40,7 +40,7 @@ def measure_perpendicular_thickness(
     float_px = -float_uy
     float_py = float_ux
     int_roiH, int_roiW = arr_gray.shape[:2]
-    int_half_scan = max(40, int(2.0 * float_px_per_um))
+    int_half_scan = max(15, int(0.5 * float_px_per_um))
     int_center = int_half_scan
     arr_scan = np.arange(-int_half_scan, int_half_scan + 1, dtype=np.float32)
     list_widths: tp.List[float] = []
@@ -146,28 +146,17 @@ def detect_acicular_lsd(
             compute_adaptive_block_size(int_roiH, int_roiW, 12), 4,
         )
         float_otsu_thresh = 0.0
+        arr_binary_for_profile: tp.Optional[np.ndarray] = arr_thresh_binary
         str_thresh_key = "lsd_02_adaptive_thresh"
     else:
         float_otsu_thresh, arr_thresh_binary = cv2.threshold(
             arr_blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        arr_binary_for_profile = None
         str_thresh_key = "lsd_02_otsu_thresh"
 
-    # Auto-invert when background dominates (>55% white), consistent with
-    # detect_acicular_candidates_opencv and detect_sphere_roi.
-    # Ensures particles are always foreground (white) for density and
-    # perpendicular-scan regardless of SEM imaging polarity.
-    int_total_px = int_roiH * int_roiW
-    if int_total_px > 0 and float((arr_thresh_binary > 0).sum()) / int_total_px > 0.55:
-        arr_thresh_binary = cv2.bitwise_not(arr_thresh_binary)
-
-    # Always drive perpendicular scan from binary (polarity-normalised above)
-    arr_binary_for_profile: tp.Optional[np.ndarray] = arr_thresh_binary
-
-    # Density: fraction of foreground (particle) pixels after polarity correction.
-    float_density = (
-        float((arr_thresh_binary > 0).sum()) / int_total_px
-        if int_total_px > 0 else 0.0
-    )
+    # Density: fraction of bright (white) pixels in the binary image.
+    # More black area (background) → lower density.
+    float_density = float((arr_thresh_binary > 0).sum()) / (int_roiH * int_roiW)
 
     obj_lsd = cv2.createLineSegmentDetector(0)
     arr_lines, _, _, _ = obj_lsd.detect(arr_blur)
