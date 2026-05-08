@@ -282,10 +282,14 @@ def save_primary_batch_histograms(
     """
     str_prefix = f"{str_lot}  " if str_lot else ""
 
-    list_thickness: tp.List[float] = [
-        v for v in (dict_batchSummary.get("all_primary_thickness_um_raw") or [])
-        if not math.isnan(float(v))
-    ]
+    list_thickness: tp.List[float] = []
+    for v in (dict_batchSummary.get("all_primary_thickness_um_raw") or []):
+        try:
+            fv = float(v)
+            if not math.isnan(fv):
+                list_thickness.append(fv)
+        except (TypeError, ValueError):
+            pass
     list_densities: tp.List[float] = []
     for dict_g in (dict_batchSummary.get("img_ids") or []):
         for dict_f in (dict_g.get("files") or []):

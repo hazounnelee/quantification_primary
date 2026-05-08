@@ -997,17 +997,23 @@ class Sam2AspectRatioService:
                 for dict_row in list_particleRows:
                     obj_writer.writerow(dict_row)
 
-        save_particle_distribution_histogram(
-            path_particlesCsv=path_csvParticle,
-            path_outputImage=self.obj_config.path_outputDir / "particle_dist.png",
-            path_inputImage=self.obj_config.path_input,
-        )
+        try:
+            save_particle_distribution_histogram(
+                path_particlesCsv=path_csvParticle,
+                path_outputImage=self.obj_config.path_outputDir / "particle_dist.png",
+                path_inputImage=self.obj_config.path_input,
+            )
+        except Exception as exc:
+            print(f"[WARN] particle_dist.png 저장 실패: {exc}", flush=True)
 
-        save_sphericity_distribution_histogram(
-            path_particlesCsv=path_csvParticle,
-            path_outputImage=self.obj_config.path_outputDir / "sphericity_dist.png",
-            path_inputImage=self.obj_config.path_input,
-        )
+        try:
+            save_sphericity_distribution_histogram(
+                path_particlesCsv=path_csvParticle,
+                path_outputImage=self.obj_config.path_outputDir / "sphericity_dist.png",
+                path_inputImage=self.obj_config.path_input,
+            )
+        except Exception as exc:
+            print(f"[WARN] sphericity_dist.png 저장 실패: {exc}", flush=True)
 
         with (self.obj_config.path_outputDir / "summary.json").open("w", encoding="utf-8") as obj_f:
             json_dump_safe(dict_summary, obj_f)

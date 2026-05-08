@@ -952,10 +952,13 @@ class PrimaryParticleService(Sam2AspectRatioService):
                         obj_writer.writerow(dict_row)
 
         # thickness 분포 histogram
-        self.save_thickness_histogram(
-            list_objects,
-            self.obj_config.path_outputDir / "thickness_dist.png",
-        )
+        try:
+            self.save_thickness_histogram(
+                list_objects,
+                self.obj_config.path_outputDir / "thickness_dist.png",
+            )
+        except Exception as exc:
+            print(f"[WARN] thickness_dist.png 저장 실패: {exc}", flush=True)
 
         # JSON
         with (self.obj_config.path_outputDir / "summary.json").open(
