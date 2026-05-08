@@ -46,8 +46,13 @@ def _load() -> tp.Dict[str, tp.Any]:
     if _PRESETS is None:
         with _PRESETS_LOCK:
             if _PRESETS is None:
-                with _PRESETS_PATH.open(encoding="utf-8") as f:
-                    _PRESETS = yaml.safe_load(f) or {}
+                try:
+                    with _PRESETS_PATH.open(encoding="utf-8") as f:
+                        _PRESETS = yaml.safe_load(f) or {}
+                except FileNotFoundError:
+                    import sys
+                    print(f"[WARN] 프리셋 파일을 찾을 수 없습니다: {_PRESETS_PATH} (기본값 사용)", file=sys.stderr, flush=True)
+                    _PRESETS = {}
     return _PRESETS
 
 
@@ -69,7 +74,7 @@ def load_paths_config(str_config_path: str) -> tp.Dict[str, tp.Any]:
     try:
         with Path(str_config_path).open(encoding="utf-8") as obj_f:
             obj_raw = yaml.safe_load(obj_f) or {}
-    except FileNotFoundError:
+    except (FileNotFoundError, yaml.YAMLError):
         return {}
     return {
         str_k: str_v
