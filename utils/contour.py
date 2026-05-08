@@ -10,6 +10,7 @@ from utils.metrics import convert_pixels_to_micrometers
 CONST_FUSE_ANGLE_DEG: float = 15.0
 CONST_FUSE_OVERLAP_RATIO: float = 0.7
 CONST_FUSE_LONG_AXIS_THRESHOLD: float = 0.70
+CONST_FUSE_CONTAINMENT_THRESHOLD: float = 0.90
 
 
 def fuse_contours(
@@ -68,9 +69,32 @@ def fuse_contours(
     arr_candidate = np.triu(arr_bbox_ok & arr_angle_ok, k=1)
     list_pairs = list(zip(*np.where(arr_candidate)))
 
+    # advanced_fuse: masks that are >90% contained in a larger mask are dropped entirely
+    # (they're redundant sub-detections, not separate particles to be merged)
+    set_drop: tp.Set[int] = set()
+
     for int_i, int_j in list_pairs:
-        # Advanced fuse: skip if centroid displacement is predominantly along long axis
-        # (end-to-end needles — likely separate particles, not one thick one)
+        if int_i in set_drop or int_j in set_drop:
+            continue
+
+        float_inter = float((list_masks[int_i] & list_masks[int_j]).sum())
+        if float_inter <= 0.0:
+            continue
+
+        float_smaller_area = min(arr_areas[int_i], arr_areas[int_j])
+        float_overlap = float_inter / max(float_smaller_area, 1.0)
+
+        # Advanced fuse containment check: drop the smaller if >90% inside the larger
+        if float_long_axis_threshold is not None:
+            if float_overlap >= CONST_FUSE_CONTAINMENT_THRESHOLD:
+                int_small = int_i if arr_areas[int_i] <= arr_areas[int_j] else int_j
+                set_drop.add(int_small)
+                continue
+
+        if float_overlap < float_overlap_ratio:
+            continue
+
+        # Advanced fuse direction check: skip if displacement is predominantly along long axis
         if float_long_axis_threshold is not None:
             float_avg_rad = np.radians(
                 (float(arr_angles[int_i]) + float(arr_angles[int_j])) / 2.0
@@ -85,17 +109,14 @@ def fuse_contours(
                 if float_d_long / float_dist > float_long_axis_threshold:
                     continue
 
-        float_inter = float((list_masks[int_i] & list_masks[int_j]).sum())
-        if float_inter <= 0.0:
-            continue
-        if float_inter / max(min(arr_areas[int_i], arr_areas[int_j]), 1.0) < float_overlap_ratio:
-            continue
         pi, pj = _find(int_i), _find(int_j)
         if pi != pj:
             parent[pi] = pj
 
     groups: tp.Dict[int, tp.List[int]] = {}
     for i in range(n):
+        if i in set_drop:
+            continue
         groups.setdefault(_find(i), []).append(i)
 
     list_new_objects: tp.List[PrimaryParticleMeasurement] = []

@@ -5,7 +5,7 @@ acicular:
     auto_detect_sphere: true
     sphere_cap_fraction: 0.65
     auto_center_crop: true
-    center_crop_ratio: 0.60
+    center_crop_ratio: 0.30
     tile_size: 192
     stride: 96
     points_per_tile: 120
