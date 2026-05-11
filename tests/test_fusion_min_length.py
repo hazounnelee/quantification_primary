@@ -171,8 +171,8 @@ adv_D, _ = fuse_contours(
     float_scale_um=SCALE_UM,
     bool_advanced=True,
 )
-print(f"[Case 4a] D1+D2 (단축 방향 나란히) advanced_fuse: 2 → {len(adv_D)}개  (기대 2)")
-assert len(adv_D) == 2, f"단축 방향 나란히는 advanced_fuse에서 합치지 않아야 함, 실제 {len(adv_D)}개"
+print(f"[Case 4a] D1+D2 (단축 방향 나란히, 단면겹침=0.80<0.90) advanced_fuse: 2 → {len(adv_D)}개  (기대 2)")
+assert len(adv_D) == 2, f"단면겹침 0.80은 임계값 0.90 미만이라 합치지 않아야 함, 실제 {len(adv_D)}개"
 
 # E1+E2: 장축 방향 끝-끝 → advanced_fuse에서 합침
 adv_E, _ = fuse_contours(

@@ -12,8 +12,7 @@ CONST_FUSE_OVERLAP_RATIO: float = 0.7
 
 # advanced_fuse 전용
 CONST_FUSE_CONTAINMENT_THRESHOLD: float = 0.70   # 작은 마스크가 큰 마스크에 70% 이상 포함 → 드롭
-CONST_FUSE_LONG_AXIS_THRESHOLD: float = 0.70     # 중심 변위의 장축 방향 성분 비율 >= 이 값 → 끝-끝
-CONST_FUSE_SHORT_OVERLAP_THRESHOLD: float = 0.70  # 단축 방향 투영 겹침 / min(t_i,t_j)
+CONST_FUSE_SHORT_OVERLAP_THRESHOLD: float = 0.90  # 단축 방향 투영 겹침 / min(t_i,t_j)
 
 
 def _proj_overlap(
@@ -111,16 +110,7 @@ def fuse_contours(
             float_cos = float(np.cos(float_avg_rad))
             float_sin = float(np.sin(float_avg_rad))
 
-            # 2-1. 중심 변위가 장축 방향인지 (끝-끝 배열)
-            float_dx = arr_cx[int_j] - arr_cx[int_i]
-            float_dy = arr_cy[int_j] - arr_cy[int_i]
-            float_dist = float(np.sqrt(float_dx ** 2 + float_dy ** 2))
-            if float_dist > 1.0:
-                float_d_long = abs(float_dx * float_cos + float_dy * float_sin)
-                if float_d_long / float_dist < CONST_FUSE_LONG_AXIS_THRESHOLD:
-                    continue  # 단축 방향으로 나란히 붙은 경우 → 합치지 않음
-
-            # 2-2. 장축 방향 투영 겹침 > 0 (실제로 닿아 있음)
+            # 2-1. 장축 방향 투영 겹침 > 0 (실제로 닿아 있음)
             float_long_ci = arr_cx[int_i] * float_cos + arr_cy[int_i] * float_sin
             float_long_cj = arr_cx[int_j] * float_cos + arr_cy[int_j] * float_sin
             float_long_overlap = _proj_overlap(
@@ -130,7 +120,7 @@ def fuse_contours(
             if float_long_overlap <= 0.0:
                 continue
 
-            # 2-3. 단축 방향 단면 겹침 (두 마스크의 단면이 정렬됨)
+            # 2-2. 단축 방향 단면 겹침 (두 마스크의 단면이 정렬됨)
             float_short_ci = -arr_cx[int_i] * float_sin + arr_cy[int_i] * float_cos
             float_short_cj = -arr_cx[int_j] * float_sin + arr_cy[int_j] * float_cos
             float_short_overlap = _proj_overlap(
