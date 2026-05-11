@@ -12,8 +12,9 @@ from queue import Queue
 import numpy as np
 from tqdm import tqdm
 
+import cv2
 from core.schema import Sam2AspectRatioConfig, Sam2AspectRatioResult
-from services.sam2_service import Sam2AspectRatioService
+from services.sam2_service import Sam2AspectRatioService, CONST_PREPROCESS_BOTTOM_CROP, CONST_PREPROCESS_WIDTH
 from utils.io import collect_input_groups
 from utils.metrics import calculate_mean_from_optional_values, calculate_percentage, json_dump_safe, pooled_stats
 from utils.histograms import save_secondary_batch_histograms
@@ -48,6 +49,24 @@ CONST_DEFAULT_POINT_BATCH_SIZE: int = 32
 CONST_DEFAULT_DEDUP_IOU: float = 0.60
 CONST_DEFAULT_BBOX_DEDUP_IOU: float = 0.85
 CONST_DEFAULT_USE_POINT_PROMPTS: bool = True
+
+
+class SecondaryParticleService(Sam2AspectRatioService):
+    """2차 입자 전용 서비스 — width-only resize + bottom crop으로 load."""
+
+    def load_image_bgr(self) -> np.ndarray:
+        arr_image = cv2.imread(str(self.obj_config.path_input), cv2.IMREAD_COLOR)
+        if arr_image is None:
+            raise FileNotFoundError(
+                f"이미지를 읽을 수 없습니다: {self.obj_config.path_input}")
+        int_w = max(1, self.obj_config.int_preprocessWidth)
+        int_crop = round(int_w * CONST_PREPROCESS_BOTTOM_CROP / CONST_PREPROCESS_WIDTH)
+        int_img_h, int_img_w = arr_image.shape[:2]
+        if int_img_w != int_w:
+            int_new_h = max(1, round(int_img_h * int_w / int_img_w))
+            arr_image = cv2.resize(arr_image, (int_w, int_new_h), interpolation=cv2.INTER_LINEAR)
+        int_h_final = max(1, arr_image.shape[0] - int_crop)
+        return arr_image[:int_h_final, :]
 
 
 # ── Output-dir naming (secondary uses stem+ext format for uniqueness) ──────────
@@ -263,7 +282,7 @@ def run_secondary_particle_analysis(
     if not bool_isBatch:
         str_groupId, list_imagePaths = list_inputGroups[0]
         print(f"[single] processing: {list_imagePaths[0].name}", flush=True)
-        obj_result = Sam2AspectRatioService(_create_config(str_groupId, list_imagePaths[0])).process()
+        obj_result = SecondaryParticleService(_create_config(str_groupId, list_imagePaths[0])).process()
         print(f"[single] done: {list_imagePaths[0].name}", flush=True)
         return obj_result.dict_summary
 
@@ -292,13 +311,13 @@ def run_secondary_particle_analysis(
 
     # 디바이스별 모델 초기화 (OpenCV 모드에서는 생략)
     str_firstGroupId, list_firstImages = list_inputGroups[0]
-    list_gpu_services: tp.List[Sam2AspectRatioService] = []
+    list_gpu_services: tp.List[SecondaryParticleService] = []
     for str_dev in list_devices:
         cfg_dev = dataclasses.replace(
             _create_config(str_firstGroupId, list_firstImages[0]),
             str_device=str_dev,
         )
-        obj_svc = Sam2AspectRatioService(cfg_dev)
+        obj_svc = SecondaryParticleService(cfg_dev)
         if not bool_useOpenCV:
             print(f"[batch] init model on {str_dev or 'auto'}: {list_firstImages[0].name}", flush=True)
             obj_svc.initialize_model()
@@ -317,7 +336,7 @@ def run_secondary_particle_analysis(
             if bool_useOpenCV:
                 # OpenCV 모드: 모델 공유 불필요 → 큐 경합 없이 독립 실행
                 try:
-                    obj_service = Sam2AspectRatioService(_create_config(str_groupId, path_image))
+                    obj_service = SecondaryParticleService(_create_config(str_groupId, path_image))
                     float_t0 = time.perf_counter()
                     obj_result = obj_service.process()
                     dict_fs = dict(obj_result.dict_summary)
@@ -332,7 +351,7 @@ def run_secondary_particle_analysis(
             # SAM2 모드: GPU 큐에서 모델 인스턴스 빌림
             obj_gpu = obj_gpu_queue.get()
             try:
-                obj_service = Sam2AspectRatioService(
+                obj_service = SecondaryParticleService(
                     dataclasses.replace(
                         _create_config(str_groupId, path_image),
                         str_device=obj_gpu.obj_config.str_device,

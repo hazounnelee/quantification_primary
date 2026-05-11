@@ -212,14 +212,11 @@ class Sam2AspectRatioService:
             raise FileNotFoundError(
                 f"이미지를 읽을 수 없습니다: {self.obj_config.path_input}")
         int_w = max(1, self.obj_config.int_preprocessWidth)
+        int_h_raw = max(1, round(int_w * CONST_PREPROCESS_HEIGHT / CONST_PREPROCESS_WIDTH))
         int_crop = round(int_w * CONST_PREPROCESS_BOTTOM_CROP / CONST_PREPROCESS_WIDTH)
-        int_img_h, int_img_w = arr_image.shape[:2]
-        # Resize width only (maintain aspect ratio) — never force a fixed height
-        if int_img_w != int_w:
-            int_new_h = max(1, round(int_img_h * int_w / int_img_w))
-            arr_image = cv2.resize(arr_image, (int_w, int_new_h), interpolation=cv2.INTER_LINEAR)
-        # Bottom crop (scale bar removal)
-        int_h_final = max(1, arr_image.shape[0] - int_crop)
+        int_h_final = max(1, int_h_raw - int_crop)
+        if arr_image.shape[:2] != (int_h_raw, int_w):
+            arr_image = cv2.resize(arr_image, (int_w, int_h_raw), interpolation=cv2.INTER_LINEAR)
         return arr_image[:int_h_final, :]
 
     def extract_inference_roi(
