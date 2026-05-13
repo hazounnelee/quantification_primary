@@ -133,9 +133,10 @@ def _draw_quartile_hist(
     str_unit: str,
     float_xlim_min: tp.Optional[float],
     float_xlim_max: tp.Optional[float],
+    int_bins_factor: int = 1,
 ) -> None:
     """Draw a histogram with Q1/Q2/Q3 markers and IQR shading on an existing Axes."""
-    int_bins = int(np.clip(np.sqrt(len(arr_v)), 5, 30))
+    int_bins = int(np.clip(np.sqrt(len(arr_v)) * int_bins_factor, 5 * int_bins_factor, 150))
     obj_ax.hist(arr_v, bins=int_bins, alpha=0.65, color=str_color,
                 edgecolor="#333333", linewidth=0.8)
 
@@ -179,6 +180,7 @@ def _save_batch_hist(
     str_unit: str = "",
     float_xlim_min: tp.Optional[float] = None,
     float_xlim_max: tp.Optional[float] = None,
+    int_bins_factor: int = 1,
 ) -> None:
     obj_fig = Figure(figsize=(10, 6), dpi=100)
     obj_ax = obj_fig.add_subplot(111)
@@ -191,7 +193,7 @@ def _save_batch_hist(
         if list_vals:
             arr_v = np.array(list_vals, dtype=np.float64)
             _draw_quartile_hist(obj_ax, arr_v, str_color, str_unit,
-                                float_xlim_min, float_xlim_max)
+                                float_xlim_min, float_xlim_max, int_bins_factor)
         else:
             obj_ax.text(0.5, 0.5, "No data", ha="center", va="center",
                         transform=obj_ax.transAxes, fontsize=13, color="#666666")
@@ -250,6 +252,7 @@ def save_secondary_batch_histograms(
 
     float_size_xmin,     float_size_xmax     = _std_xlim(list_sizes)
     float_sph_xmin,      float_sph_xmax      = _std_xlim(list_sphs)
+    float_sph_xmax = min(float_sph_xmax, 1.0) if float_sph_xmax is not None else 1.0
     float_fine_xmin,     float_fine_xmax     = _std_xlim(list_fine)
     float_size_std_xmin, float_size_std_xmax = _std_xlim(list_size_stds)
 
@@ -261,6 +264,7 @@ def save_secondary_batch_histograms(
         str_color="#5588ff",
         str_unit=" µm",
         float_xlim_min=float_size_xmin, float_xlim_max=float_size_xmax,
+        int_bins_factor=5,
     )
     _save_batch_hist(
         list_vals=list_size_stds,
@@ -471,6 +475,7 @@ def save_lot_particle_scatter_histogram(
                 obj_ax_scat.vlines(arr_x, 0, arr_y, color=str_color, alpha=0.25, linewidth=0.8)
                 obj_ax_scat.scatter(arr_x, arr_y, color=str_color, alpha=0.5, s=8, linewidths=0)
 
+        obj_fig.tight_layout()
         obj_fig.savefig(str(path_output), bbox_inches="tight")
     finally:
         obj_fig.clf()
