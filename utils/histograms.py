@@ -363,3 +363,114 @@ def save_primary_batch_histograms(
         str_unit="",
         **(dict(zip(("float_xlim_min", "float_xlim_max"), _std_xlim(list_densities)))),
     )
+
+
+def save_lot_particle_scatter_histogram(
+    path_lot_dir: Path,
+    path_output: Path,
+    str_lot: str = "",
+) -> None:
+    """LOT 하위 폴더의 모든 objects.csv를 읽어 히스토그램 + 1D 산점도를 저장한다.
+
+    위 패널: 전구체/미분 분류별 입도 히스토그램 (mean ± 1.96σ x축)
+    아래 패널: 동일 x축 공유, 각 입자를 점으로 찍고 x축까지 수직선 연결
+    """
+    import matplotlib.gridspec as gridspec
+
+    list_particle_sizes: tp.List[float] = []
+    list_fragment_sizes: tp.List[float] = []
+
+    for path_csv in sorted(path_lot_dir.glob("*/objects.csv")):
+        try:
+            with path_csv.open(encoding="utf-8-sig") as obj_f:
+                for dict_row in csv.DictReader(obj_f):
+                    str_cat = dict_row.get("str_category", "")
+                    try:
+                        fv = float(dict_row.get("float_eqDiameterUm", ""))
+                        if not math.isnan(fv) and fv > 0:
+                            if str_cat == "particle":
+                                list_particle_sizes.append(fv)
+                            elif str_cat == "fragment":
+                                list_fragment_sizes.append(fv)
+                    except (TypeError, ValueError):
+                        pass
+        except Exception:
+            pass
+
+    list_all = list_particle_sizes + list_fragment_sizes
+    if not list_all:
+        return
+
+    float_xmin, float_xmax = _std_xlim(list_all)
+    arr_all = np.array(list_all, dtype=np.float64)
+    if float_xmin is None:
+        float_xmin = float(arr_all.min())
+    if float_xmax is None:
+        float_xmax = float(arr_all.max())
+
+    str_prefix = f"{str_lot}  " if str_lot else ""
+    rng = np.random.default_rng(seed=0)
+
+    obj_fig = Figure(figsize=(12, 7), dpi=100)
+    gs = gridspec.GridSpec(2, 1, figure=obj_fig, height_ratios=[4, 1], hspace=0.08)
+    obj_ax_hist = obj_fig.add_subplot(gs[0])
+    obj_ax_scat = obj_fig.add_subplot(gs[1], sharex=obj_ax_hist)
+
+    try:
+        # ── 히스토그램 ──────────────────────────────────────────────────
+        obj_ax_hist.set_title(
+            f"{str_prefix}Particle Size — All Objects  "
+            f"(particle={len(list_particle_sizes)}, fragment={len(list_fragment_sizes)})",
+            fontsize=13)
+        obj_ax_hist.set_ylabel("Count", fontsize=11)
+        obj_ax_hist.tick_params(labelsize=10)
+        obj_ax_hist.set_xlim(float_xmin, float_xmax)
+
+        int_bins = int(np.clip(np.sqrt(len(list_all)), 8, 40))
+
+        for list_vals, str_label, str_color in [
+            (list_particle_sizes, "Particle", "#5588ff"),
+            (list_fragment_sizes, "Fragment", "#ff6622"),
+        ]:
+            if list_vals:
+                obj_ax_hist.hist(
+                    list_vals, bins=int_bins, alpha=0.55, color=str_color,
+                    edgecolor="#333333", linewidth=0.6, label=str_label,
+                    range=(float_xmin, float_xmax),
+                )
+
+        float_mean_all = float(np.mean(arr_all))
+        float_std_all  = float(np.std(arr_all))
+        obj_ax_hist.axvline(float_mean_all, color="#222222", linewidth=1.5, linestyle="--",
+                            label=f"mean={float_mean_all:.3f} µm")
+        obj_ax_hist.axvline(float_mean_all - 1.96 * float_std_all,
+                            color="#888888", linewidth=1.0, linestyle=":")
+        obj_ax_hist.axvline(float_mean_all + 1.96 * float_std_all,
+                            color="#888888", linewidth=1.0, linestyle=":")
+        obj_ax_hist.legend(fontsize=10)
+        obj_ax_hist.grid(axis="y", linestyle="--", alpha=0.3)
+        obj_ax_hist.tick_params(labelbottom=False)
+
+        # ── 1D 산점도 (rug) ─────────────────────────────────────────────
+        obj_ax_scat.set_xlabel("Equivalent Diameter (µm)", fontsize=11)
+        obj_ax_scat.set_ylabel("", fontsize=1)
+        obj_ax_scat.set_ylim(0, 1)
+        obj_ax_scat.tick_params(left=False, labelleft=False, labelsize=10)
+        obj_ax_scat.set_xlim(float_xmin, float_xmax)
+
+        for list_vals, str_color in [
+            (list_particle_sizes, "#5588ff"),
+            (list_fragment_sizes, "#ff6622"),
+        ]:
+            if list_vals:
+                arr_x = np.array(list_vals, dtype=np.float64)
+                # x축 범위 밖 점은 그리지 않음
+                arr_x = arr_x[(arr_x >= float_xmin) & (arr_x <= float_xmax)]
+                # y 방향 jitter로 겹침 완화
+                arr_y = rng.uniform(0.15, 0.85, size=len(arr_x))
+                obj_ax_scat.vlines(arr_x, 0, arr_y, color=str_color, alpha=0.25, linewidth=0.8)
+                obj_ax_scat.scatter(arr_x, arr_y, color=str_color, alpha=0.5, s=8, linewidths=0)
+
+        obj_fig.savefig(str(path_output), bbox_inches="tight")
+    finally:
+        obj_fig.clf()
