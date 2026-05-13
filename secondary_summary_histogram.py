@@ -6,12 +6,12 @@ import json
 import sys
 from pathlib import Path
 
-from utils.histograms import save_secondary_batch_histograms, save_lot_particle_scatter_histogram
+from utils.histograms import save_secondary_batch_histograms
 
 
 def main() -> None:
     obj_parser = argparse.ArgumentParser(
-        description="batch_summary.json에서 2차 입자 히스토그램을 생성합니다.",
+        description="batch_summary.json에서 2차 입자 size/sphericity/fine_ratio 히스토그램을 생성합니다.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     obj_parser.add_argument(
@@ -25,10 +25,7 @@ def main() -> None:
     )
     obj_parser.add_argument(
         "--lot", default=None,
-        help=(
-            "LOT 하위 폴더명. 지정하면 해당 LOT의 모든 입자(전구체+미분)에 대해 "
-            "히스토그램+1D 산점도를 추가로 생성한다."
-        ),
+        help="차트 제목에 표시할 lot 이름. 미지정 시 summary 파일의 부모 디렉토리명 사용.",
     )
     obj_args = obj_parser.parse_args()
 
@@ -43,23 +40,14 @@ def main() -> None:
     path_outputDir = Path(obj_args.output_dir) if obj_args.output_dir else path_summary.parent
     path_outputDir.mkdir(parents=True, exist_ok=True)
 
-    str_lot_title = obj_args.lot or path_summary.parent.name
+    str_lot = obj_args.lot or path_summary.parent.name
 
     print(f"[info] summary: {path_summary}")
     print(f"[info] output : {path_outputDir}")
-    print(f"[info] lot    : {str_lot_title}")
+    print(f"[info] lot    : {str_lot}")
 
-    save_secondary_batch_histograms(dict_batchSummary, path_outputDir, str_lot=str_lot_title)
+    save_secondary_batch_histograms(dict_batchSummary, path_outputDir, str_lot=str_lot)
     print("[done] batch_hist_size.png, batch_hist_size_std.png, batch_hist_sphericity.png, batch_hist_fine_ratio.png 저장 완료")
-
-    if obj_args.lot:
-        path_lot_dir = path_summary.parent / obj_args.lot
-        if not path_lot_dir.is_dir():
-            print(f"[WARN] LOT 폴더를 찾을 수 없습니다: {path_lot_dir}", file=sys.stderr)
-        else:
-            path_scatter = path_outputDir / f"lot_{obj_args.lot}_scatter.png"
-            save_lot_particle_scatter_histogram(path_lot_dir, path_scatter, str_lot=obj_args.lot)
-            print(f"[done] {path_scatter.name} 저장 완료")
 
 
 if __name__ == "__main__":
