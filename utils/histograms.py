@@ -111,7 +111,7 @@ def save_sphericity_distribution_histogram(
             obj_ax.text(float_mean, obj_ax.get_ylim()[1] * 0.95,
                         f"  mean: {float_mean:.3f}",
                         color="#44cc44", fontsize=11, va="top")
-            obj_ax.set_xlim(0, 1)
+            obj_ax.set_xlim(0, 0.99)
             obj_ax.legend(fontsize=12)
             obj_ax.grid(axis="y", linestyle="--", alpha=0.3)
         else:
@@ -293,7 +293,7 @@ def save_secondary_batch_histograms(
 
     float_size_xmin,     float_size_xmax     = _std_xlim(list_sizes)
     float_sph_xmin,      float_sph_xmax      = _std_xlim(list_sphs)
-    float_sph_xmax = min(float_sph_xmax, 1.0) if float_sph_xmax is not None else 1.0
+    float_sph_xmax = min(float_sph_xmax, 0.99) if float_sph_xmax is not None else 0.99
     float_fine_xmin,     float_fine_xmax     = _std_xlim(list_fine)
     float_size_std_xmin, float_size_std_xmax = _std_xlim(list_size_stds)
     float_size_pi_xmin,  float_size_pi_xmax  = _std_xlim(list_size_per_image)
