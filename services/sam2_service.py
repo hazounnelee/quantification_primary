@@ -1024,7 +1024,7 @@ class Sam2AspectRatioService:
                 int_px = int(dict_pt["point_xy_roi"][0])
                 int_py = int(dict_pt["point_xy_roi"][1])
                 int_label = dict_pt.get("label", 1)
-                tpl_color = (0, 255, 255) if int_label == 1 else (0, 0, 255)
+                tpl_color = (0, 255, 255) if int_label == 1 else (255, 255, 0)
                 cv2.circle(arr_pts_viz, (int_px, int_py), 3, tpl_color, -1)
             cv2.imwrite(str(self.obj_config.path_outputDir / "04_pipeline_point_prompts.png"), arr_pts_viz)
 
