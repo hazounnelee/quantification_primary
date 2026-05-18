@@ -10,6 +10,9 @@ from utils.image import (
     enhance_image_texture,
     sample_interest_points,
     sample_prompt_points,
+    find_dist_transform_peaks,
+    detect_hybrid_candidates,
+    detect_watershed_prompts,
     detect_sphere_roi,
     compute_center_roi,
 )

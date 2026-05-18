@@ -13,7 +13,7 @@ import yaml
 
 from core.schema import Sam2AspectRatioConfig, ObjectMeasurement, Sam2AspectRatioResult
 from models import load_sam2_model
-from utils.image import draw_label_no_overlap, create_processing_tiles, enhance_image_texture, sample_interest_points, sample_prompt_points
+from utils.image import draw_label_no_overlap, create_processing_tiles, enhance_image_texture, sample_interest_points, sample_prompt_points, find_dist_transform_peaks, detect_hybrid_candidates, detect_watershed_prompts
 from utils.metrics import convert_pixels_to_micrometers, calculate_percentage, json_dump_safe
 from utils.iou import calculate_binary_iou, calculate_box_iou
 from utils.io import iter_chunks
@@ -320,15 +320,44 @@ class Sam2AspectRatioService:
 
             if self.obj_config.bool_usePointPrompts:
                 arr_tileGray = arr_inputGray[int_ty1:int_ty2, int_tx1:int_tx2].copy()
+                list_isolatedMasks: tp.List[np.ndarray] = []
                 try:
-                    list_posPoints, list_negPoints = sample_prompt_points(
+                    list_isolatedMasks, list_posPoints, list_negPoints = detect_watershed_prompts(
                         arr_tileGray=arr_tileGray,
-                        int_maxParticles=self.obj_config.int_pointsPerTile,
                         int_minDist=self.obj_config.int_pointMinDistance,
-                        int_numNegative=self.obj_config.int_numNegativePoints,
+                        int_numNeg=self.obj_config.int_numNegativePoints,
+                        int_minArea=int(self.obj_config.float_particleAreaThreshold),
                     )
                 except Exception as exc:
                     print(f"[WARN] tile {int_tileIdx} 포인트 추출 실패 (skip): {exc}", flush=True)
+
+                # ── isolated 마스크: OpenCV 직접 수용 ──────────────────────────
+                for arr_tileMask in list_isolatedMasks:
+                    if int(arr_tileMask.sum()) < self.obj_config.int_minValidMaskArea:
+                        continue
+                    arr_tileContour = self.extract_largest_contour(arr_tileMask)
+                    if arr_tileContour is None:
+                        continue
+                    int_bx, int_by, int_bw, int_bh = cv2.boundingRect(arr_tileContour)
+                    int_tileH, int_tileW = arr_tileMask.shape[:2]
+                    if self.is_bbox_near_edge(int_bx, int_by, int_bw, int_bh,
+                                              int_tileW, int_tileH,
+                                              self.obj_config.int_tileEdgeMargin):
+                        continue
+                    tuple_globalBox = (int_tx1 + int_bx, int_ty1 + int_by, int_bw, int_bh)
+                    if any(calculate_box_iou(tuple_globalBox, b) >= self.obj_config.float_bboxDedupIou
+                           for b in list_keptBboxes):
+                        int_bboxDedupRejected += 1
+                        continue
+                    arr_roiMask = np.zeros((int_roiHeight, int_roiWidth), dtype=np.uint8)
+                    arr_roiMask[int_ty1:int_ty2, int_tx1:int_tx2] = arr_tileMask
+                    if any(calculate_binary_iou(arr_roiMask, m) >= self.obj_config.float_dedupIou
+                           for m in list_keptMasks):
+                        continue
+                    int_acceptedCount += 1
+                    list_keptMasks.append(arr_roiMask)
+                    list_keptBboxes.append(tuple_globalBox)
+                    list_keptScores.append(None)
 
                 for int_px, int_py in list_posPoints:
                     int_candidateCount += 1
@@ -362,20 +391,19 @@ class Sam2AspectRatioService:
                 }
             )
 
-            # positive 포인트 하나씩 + 공유 negative 포인트로 SAM2 호출
-            list_promptIter: tp.List[tp.Optional[tp.Tuple[int, int]]] = (
-                list_posPoints if self.obj_config.bool_usePointPrompts else [None])
+            # 포지티브 포인트를 배치로 묶어 SAM2 호출 (1배치 = N마스크)
+            list_promptBatches = (
+                list(iter_chunks(list_posPoints, max(1, self.obj_config.int_pointBatchSize)))
+                if self.obj_config.bool_usePointPrompts else [None]
+            )
 
-            for tpl_pos in list_promptIter:
+            for list_batch in list_promptBatches:
                 try:
                     if self.obj_config.bool_usePointPrompts:
-                        arr_pts = [[int(tpl_pos[0]), int(tpl_pos[1])]] + [
-                            [int(nx), int(ny)] for nx, ny in list_negPoints]
-                        arr_labels = [1] + [0] * len(list_negPoints)
                         list_results = self.obj_model(  # type: ignore[misc]
                             source=arr_tileBgr,
-                            points=arr_pts,
-                            labels=arr_labels,
+                            points=[[int(px), int(py)] for px, py in list_batch],
+                            labels=[1] * len(list_batch),
                             **dict_predictCommon,
                         )
                     else:
@@ -443,10 +471,18 @@ class Sam2AspectRatioService:
                                 int_tx1:int_tx2] = arr_tileMask
 
                     bool_isDup = False
+                    float_new_area = float(arr_roiMask.sum())
                     for arr_prevMask in list_keptMasks:
                         if calculate_binary_iou(arr_prevMask, arr_roiMask) >= self.obj_config.float_dedupIou:
                             bool_isDup = True
                             break
+                        # 포함 관계 체크: 작은 마스크가 큰 마스크에 75%+ 포함되면 제거
+                        float_inter = float((arr_prevMask & arr_roiMask).sum())
+                        if float_inter > 0:
+                            float_small_area = min(float(arr_prevMask.sum()), float_new_area)
+                            if float_inter / max(float_small_area, 1.0) >= 0.75:
+                                bool_isDup = True
+                                break
                     if bool_isDup:
                         continue
 
@@ -479,6 +515,144 @@ class Sam2AspectRatioService:
             "candidate_points": list_debugPoints,
         }
         return arr_masks, arr_scores, dict_debug
+
+    # ── Post-processing helpers ────────────────────────────────────────────────
+
+    @staticmethod
+    def _smooth_mask(arr_mask: np.ndarray) -> np.ndarray:
+        """마스크 노이즈 제거: 모폴로지 스무딩 + 최대 연결 컴포넌트만 유지.
+
+        리아스식 해안 같은 들쭉날쭉한 경계를 정리하고, 한 마스크 안에 흩어진
+        작은 조각을 제거해 하나의 연결된 덩어리로 만든다.
+        """
+        arr_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        arr_m = cv2.morphologyEx(arr_mask, cv2.MORPH_CLOSE, arr_k, iterations=2)
+        arr_m = cv2.morphologyEx(arr_m, cv2.MORPH_OPEN, arr_k, iterations=1)
+        # 최대 connected component만 유지
+        list_cnts, _ = cv2.findContours(arr_m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not list_cnts:
+            return arr_mask
+        arr_out = np.zeros_like(arr_m)
+        cv2.drawContours(arr_out, [max(list_cnts, key=cv2.contourArea)], 0, 1, -1)
+        return arr_out
+
+    @staticmethod
+    def _correct_occluded_mask(arr_mask: np.ndarray) -> np.ndarray:
+        """가려진 입자 마스크를 convex hull로 부분 복원한다 (particle 전용).
+
+        완전한 원형 대신 convex hull을 사용해 실제로 가려진 부분만 보수적으로 복원한다:
+        - convex hull = 오목한 '깎인' 부분을 채우되 외접원보다 훨씬 보수적
+        - circularity 낮고 solidity 높은 경우(원호 모양)에만 적용
+        """
+        list_cnts, _ = cv2.findContours(arr_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not list_cnts:
+            return arr_mask
+        arr_cnt = max(list_cnts, key=cv2.contourArea)
+        float_area = float(cv2.contourArea(arr_cnt))
+        if float_area == 0:
+            return arr_mask
+
+        float_perim = cv2.arcLength(arr_cnt, True)
+        float_circ = 4.0 * np.pi * float_area / max(float_perim ** 2, 1.0)
+        # 이미 충분히 원형이면 보정 불필요
+        if float_circ >= 0.65:
+            return arr_mask
+
+        # convex hull 면적 비교: 솔리디티 낮은 건 불규칙 형태 → 건드리지 않음
+        arr_hull = cv2.convexHull(arr_cnt)
+        float_hull_area = cv2.contourArea(arr_hull)
+        float_solidity = float_area / max(float_hull_area, 1.0)
+        # solidity < 0.5: 너무 불규칙 (fragment) → skip
+        # fill_ratio > 0.85: 거의 다 보임 → 보정 불필요
+        float_fill_ratio = float_area / max(float_hull_area, 1.0)
+        if float_solidity < 0.50 or float_fill_ratio > 0.85:
+            return arr_mask
+
+        # convex hull로 채움 (완전한 원 대신 실제 가려진 오목 부분만 복원)
+        arr_corrected = np.zeros_like(arr_mask)
+        cv2.fillPoly(arr_corrected, [arr_hull], 1)
+        return arr_corrected
+
+    @staticmethod
+    def _split_peanut_mask(
+        arr_mask: np.ndarray,
+        float_ar_thresh: float = 0.60,
+        int_min_peak_dist: int = 8,
+    ) -> tp.List[np.ndarray]:
+        """땅콩/덤벨 형태의 마스크를 두 개의 마스크로 분리한다.
+
+        minAreaRect 종횡비가 float_ar_thresh 미만이고 거리변환에 두 개의 독립적인
+        피크가 존재할 때만 분리하며, 그 외에는 [원본]을 반환한다.
+        """
+        list_cnts, _ = cv2.findContours(arr_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not list_cnts:
+            return [arr_mask]
+        arr_cnt = max(list_cnts, key=cv2.contourArea)
+        _, (float_w, float_h), _ = cv2.minAreaRect(arr_cnt)
+        if float_w == 0 or float_h == 0:
+            return [arr_mask]
+        float_ar = min(float_w, float_h) / max(float_w, float_h)
+        if float_ar >= float_ar_thresh:
+            return [arr_mask]
+
+        list_peaks = find_dist_transform_peaks(arr_mask, int_min_peak_dist, int_max_peaks=2)
+        if len(list_peaks) < 2:
+            return [arr_mask]
+
+        int_h, int_w = arr_mask.shape[:2]
+        arr_markers = np.zeros((int_h, int_w), dtype=np.int32)
+        arr_markers[arr_mask == 0] = 1
+        arr_markers[list_peaks[0][1], list_peaks[0][0]] = 2
+        arr_markers[list_peaks[1][1], list_peaks[1][0]] = 3
+        arr_bgr = cv2.cvtColor((arr_mask * 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)
+        cv2.watershed(arr_bgr, arr_markers)
+
+        arr_m1 = ((arr_markers == 2) & (arr_mask > 0)).astype(np.uint8)
+        arr_m2 = ((arr_markers == 3) & (arr_mask > 0)).astype(np.uint8)
+        if arr_m1.sum() == 0 or arr_m2.sum() == 0:
+            return [arr_mask]
+        return [arr_m1, arr_m2]
+
+    def _postprocess_masks(
+        self,
+        arr_masks: np.ndarray,
+        arr_scores: tp.Optional[np.ndarray],
+    ) -> tp.Tuple[np.ndarray, tp.Optional[np.ndarray]]:
+        """마스크 후처리: 스무딩 → 땅콩 분리.
+
+        ⑤ 마스크 스무딩 + 최대 컴포넌트 유지 (리아스식 경계 제거)
+        ③ 땅콩 분리
+        ② 가려진 입자 보정은 분류 후 particle에만 적용 (process()에서 수행)
+        """
+        list_out_masks: tp.List[np.ndarray] = []
+        list_out_scores: tp.List[tp.Optional[float]] = []
+
+        for int_i, arr_mask in enumerate(arr_masks):
+            float_score = None
+            if arr_scores is not None and int_i < len(arr_scores):
+                float_score = None if math.isnan(float(arr_scores[int_i])) else float(arr_scores[int_i])
+
+            # ⑤ 스무딩: 노이즈 제거 + 최대 컴포넌트
+            arr_mask = self._smooth_mask(arr_mask)
+            if arr_mask.sum() == 0:
+                continue
+
+            # ③ 땅콩 분리
+            list_split = self._split_peanut_mask(arr_mask)
+
+            for arr_part in list_split:
+                list_out_masks.append(arr_part)
+                list_out_scores.append(float_score)
+
+        if not list_out_masks:
+            int_h, int_w = (arr_masks.shape[1], arr_masks.shape[2]) if arr_masks.ndim == 3 else (0, 0)
+            return np.empty((0, int_h, int_w), dtype=np.uint8), None
+
+        arr_out = np.stack(list_out_masks, axis=0).astype(np.uint8)
+        arr_out_scores = np.array(
+            [np.nan if s is None else s for s in list_out_scores], dtype=np.float32
+        ) if list_out_scores else None
+        return arr_out, arr_out_scores
 
     def refine_mask_for_area(self, arr_mask: np.ndarray) -> np.ndarray:
         """
@@ -1235,6 +1409,9 @@ class Sam2AspectRatioService:
         arr_masks, arr_scores, dict_debug = self.predict_tiled_point_prompts(
             arr_inputRoiBgr)
 
+        # ② 가려진 입자 보정  ③ 땅콩 분리
+        arr_masks, arr_scores = self._postprocess_masks(arr_masks, arr_scores)
+
         list_objects: tp.List[ObjectMeasurement] = []
         list_validMasks: tp.List[np.ndarray] = []
 
@@ -1248,6 +1425,10 @@ class Sam2AspectRatioService:
                 arr_mask, int_index=int_index, float_confidence=float_confidence)
             if obj_measurement is None:
                 continue
+
+            # ② 가려진 입자 보정: particle 분류된 경우에만 convex hull 복원
+            if obj_measurement.str_category == "particle":
+                arr_mask = self._correct_occluded_mask(arr_mask)
 
             list_objects.append(obj_measurement)
             list_validMasks.append(
