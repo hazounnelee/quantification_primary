@@ -537,22 +537,62 @@ class Sam2AspectRatioService:
         return arr_out
 
     @staticmethod
-    def _correct_occluded_mask(arr_mask: np.ndarray) -> np.ndarray:
-        """가려진 입자 마스크를 C1 연속 원호로 노치(notch)만 복원한다.
+    def _fit_particle_circle(arr_mask: np.ndarray) -> tp.Optional[tp.Tuple[float, float, float]]:
+        """가시 영역 컨투어의 convex hull에 Kasa 원 피팅을 수행한다.
 
-        끝점 A, B(컨투어가 hull에서 이탈하는 지점)에서 각각의 접선 그라디언트에
-        수직인 법선을 교차시켜 원의 중심을 찾고, 이 원호로 노치를 메운다.
-        가시 영역은 SAM2 원본 경계를 보존하고 가려진 부분만 부드럽게 복원한다.
-
-        복원된 마스크 = original_mask | arc_filled_circle
-        → 구형도를 복원 마스크에서 직접 측정해도 됨:
-           가시 경계(정확) + 복원 호(합리적) 로 구성.
+        여러 개의 노치가 있어도 hull 전체를 사용하므로 안정적.
+        Returns (cx, cy, r) or None if fitting fails / sanity check fails.
         """
         list_cnts, _ = cv2.findContours(arr_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
         if not list_cnts:
+            return None
+        arr_cnt = max(list_cnts, key=cv2.contourArea)
+        float_area = float(cv2.contourArea(arr_cnt))
+        if float_area == 0:
+            return None
+
+        float_perim = cv2.arcLength(arr_cnt, True)
+        float_circ = 4.0 * np.pi * float_area / max(float_perim ** 2, 1.0)
+        if float_circ >= 0.80:
+            return None
+
+        arr_hull = cv2.convexHull(arr_cnt)
+        float_hull_area = float(cv2.contourArea(arr_hull))
+        float_solidity = float_area / max(float_hull_area, 1.0)
+        if float_solidity < 0.50 or float_solidity > 0.95:
+            return None
+
+        # Kasa 최소제곱 원 피팅 (hull 포인트만 사용)
+        arr_pts = arr_hull.reshape(-1, 2).astype(np.float64)
+        arr_z = arr_pts[:, 0] ** 2 + arr_pts[:, 1] ** 2
+        arr_A = np.column_stack([2.0 * arr_pts[:, 0], 2.0 * arr_pts[:, 1], np.ones(len(arr_pts))])
+        arr_res, _, _, _ = np.linalg.lstsq(arr_A, arr_z, rcond=None)
+        float_cx = float(arr_res[0])
+        float_cy = float(arr_res[1])
+        float_r2 = float(arr_res[2]) + float_cx ** 2 + float_cy ** 2
+        if float_r2 <= 0:
+            return None
+        float_r = float(np.sqrt(float_r2))
+
+        float_r_exp = float(np.sqrt(float_area / np.pi))
+        if float_r < float_r_exp * 0.7 or float_r > float_r_exp * 1.8:
+            return None
+        if np.pi * float_r ** 2 > float_area * 4.0:
+            return None
+        return float_cx, float_cy, float_r
+
+    @staticmethod
+    def _correct_occluded_mask(arr_mask: np.ndarray) -> np.ndarray:
+        """가려진 입자의 오목 노치 영역을 convex hull로 채워 복원 후보 마스크를 반환한다.
+
+        Kasa 원은 이웃 입자 영역까지 확장될 수 있지만, convex hull은 현재 가시
+        경계 안쪽의 오목 영역만 채우므로 과도한 확장이 없다.
+        실제로 어떤 픽셀을 추가할지(밝은 픽셀만)는 process()에서 결정한다.
+        """
+        list_cnts, _ = cv2.findContours(arr_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not list_cnts:
             return arr_mask
         arr_cnt = max(list_cnts, key=cv2.contourArea)
-        int_n = len(arr_cnt)
         float_area = float(cv2.contourArea(arr_cnt))
         if float_area == 0:
             return arr_mask
@@ -568,88 +608,10 @@ class Sam2AspectRatioService:
         if float_solidity < 0.50 or float_solidity > 0.95:
             return arr_mask
 
-        # ── 노치 끝점 A, B 탐색 ──────────────────────────────────────────
-        # hull vertex 인덱스(컨투어 순서)에서 연속된 두 hull 꼭짓점 사이에
-        # 컨투어가 hull 안쪽으로 가장 깊이 들어간 구간 = 노치
-        arr_hull_idxs = cv2.convexHull(arr_cnt, returnPoints=False).flatten()
-        arr_hull_idxs = np.sort(arr_hull_idxs)
-        int_n_hull = len(arr_hull_idxs)
-
-        int_best_iA, int_best_iB, float_max_concavity = 0, 0, 0.0
-        for k in range(int_n_hull):
-            iA = int(arr_hull_idxs[k])
-            iB = int(arr_hull_idxs[(k + 1) % int_n_hull])
-            if iA < iB:
-                arr_seg = arr_cnt[iA:iB + 1, 0, :].astype(np.float64)
-            else:
-                arr_seg = np.vstack([arr_cnt[iA:, 0, :], arr_cnt[:iB + 1, 0, :]]).astype(np.float64)
-            if len(arr_seg) < 3:
-                continue
-            arr_pA = arr_cnt[iA, 0, :].astype(np.float64)
-            arr_pB = arr_cnt[iB, 0, :].astype(np.float64)
-            arr_AB = arr_pB - arr_pA
-            float_AB_len = float(np.linalg.norm(arr_AB))
-            if float_AB_len < 8.0:
-                continue
-            arr_perp = np.array([-arr_AB[1], arr_AB[0]]) / float_AB_len
-            float_concavity = float(np.max(np.abs((arr_seg - arr_pA) @ arr_perp)))
-            if float_concavity > float_max_concavity:
-                float_max_concavity = float_concavity
-                int_best_iA, int_best_iB = iA, iB
-
-        if float_max_concavity < 5.0:
-            return arr_mask
-
-        # ── A, B 에서 접선 그라디언트 계산 ──────────────────────────────
-        # 접선: 컨투어 가시 영역 쪽으로 k 스텝 이동한 방향
-        int_k = max(3, int_n // 25)
-        arr_pA = arr_cnt[int_best_iA, 0, :].astype(np.float64)
-        arr_pB = arr_cnt[int_best_iB, 0, :].astype(np.float64)
-
-        arr_prev_A = arr_cnt[(int_best_iA - int_k) % int_n, 0, :].astype(np.float64)
-        arr_next_B = arr_cnt[(int_best_iB + int_k) % int_n, 0, :].astype(np.float64)
-
-        arr_tang_A = arr_pA - arr_prev_A          # A로 들어오는 방향 (가시 영역 쪽)
-        arr_tang_B = arr_next_B - arr_pB          # B에서 나가는 방향 (가시 영역 쪽)
-        if np.linalg.norm(arr_tang_A) < 1e-6 or np.linalg.norm(arr_tang_B) < 1e-6:
-            return arr_mask
-        arr_tang_A /= np.linalg.norm(arr_tang_A)
-        arr_tang_B /= np.linalg.norm(arr_tang_B)
-
-        # ── 법선 교차 → 원호 중심 ────────────────────────────────────────
-        # 법선 = 접선을 90° 회전; 마스크 내부 방향을 향하도록 부호 결정
-        arr_centroid = arr_cnt[:, 0, :].astype(np.float64).mean(axis=0)
-        arr_norm_A = np.array([-arr_tang_A[1], arr_tang_A[0]])
-        arr_norm_B = np.array([-arr_tang_B[1], arr_tang_B[0]])
-        if float(np.dot(arr_norm_A, arr_centroid - arr_pA)) < 0:
-            arr_norm_A = -arr_norm_A
-        if float(np.dot(arr_norm_B, arr_centroid - arr_pB)) < 0:
-            arr_norm_B = -arr_norm_B
-
-        # A + t·norm_A = B + s·norm_B  →  [norm_A | -norm_B][t;s] = B - A
-        arr_M = np.column_stack([arr_norm_A, -arr_norm_B])
-        if abs(float(np.linalg.det(arr_M))) < 1e-6:
-            return arr_mask
-        arr_ts = np.linalg.solve(arr_M, arr_pB - arr_pA)
-        arr_center = arr_pA + float(arr_ts[0]) * arr_norm_A
-        float_r = float(np.linalg.norm(arr_center - arr_pA))
-
-        float_r_exp = float(np.sqrt(float_area / np.pi))
-        if float_r < float_r_exp * 0.5 or float_r > float_r_exp * 2.5:
-            return arr_mask
-
-        # ── 복원: 원본 마스크 | 피팅 원 ─────────────────────────────────
-        # original_mask 가시 경계를 보존하고, 노치 영역(원 ∩ ¬original)만 추가
-        int_h, int_w = arr_mask.shape[:2]
-        arr_circle = np.zeros_like(arr_mask)
-        cv2.circle(arr_circle,
-                   (int(round(float(arr_center[0]))), int(round(float(arr_center[1])))),
-                   int(round(float_r)), 1, -1)
-        arr_restored = (arr_mask.astype(bool) | arr_circle.astype(bool)).astype(arr_mask.dtype)
-
-        if float(arr_restored.sum()) <= float(arr_mask.sum()) * 1.02:
-            return arr_mask
-        return arr_restored
+        # convex hull 내부를 채워 후보 마스크 생성
+        arr_hull_filled = np.zeros_like(arr_mask)
+        cv2.fillPoly(arr_hull_filled, [arr_hull], 1)
+        return arr_hull_filled
 
     @staticmethod
     def _split_peanut_mask(
@@ -951,9 +913,13 @@ class Sam2AspectRatioService:
             arr_perimContour = cv2.convexHull(arr_contour) if bool_convexHullSphericity else arr_contour
             float_perimeter = float(cv2.arcLength(arr_perimContour, closed=True))
             if float_perimeter > 0.0:
-                # Bresenham 스테어케이스 아티팩트 보정: 이산 원의 둘레는 실제보다 +4.95% 과다측정됨
-                # 이론값 8(√2-1)/π ≈ 1.055, 실측 ≈ 1.0495 → 보정계수 0.9528
-                float_perimeter_corrected = float_perimeter * 0.9528
+                if bool_convexHullSphericity:
+                    # hull 둘레는 꼭짓점 간 유클리드 거리 합산 → 계단 오차 없음 → 보정 불필요
+                    float_perimeter_corrected = float_perimeter
+                else:
+                    # 원본 컨투어: Bresenham 계단이 실제 둘레보다 +4.95% 과다측정
+                    # 이론값 8(√2-1)/π ≈ 1.055, 실측 ≈ 1.0495 → 보정계수 0.9528
+                    float_perimeter_corrected = float_perimeter * 0.9528
                 float_sphericity = min(1.0, float(
                     (4.0 * np.pi * int_maskArea) / (float_perimeter_corrected ** 2)
                 ))
@@ -1505,25 +1471,28 @@ class Sam2AspectRatioService:
             if obj_measurement is None:
                 continue
 
-            # ② 가려진 입자 보정: particle이고 노치가 밝은 영역(다른 입자)인 경우만 복원.
-            # 노치가 어두운(배경) 경우 = 깨진 입자 → 복원 안 함.
-            # 복원 마스크 = 원본 가시 영역 | 원호 채움
-            # → 컨투어에 노치 경계선이 없으므로 convex hull 없이 원본 컨투어로 구형도 측정 가능.
+            # ② 가려진 입자 복원: 노치 영역을 픽셀별 밝기로 판단
+            # - 밝은 픽셀(다른 입자가 가림) → 추가
+            # - 어두운 픽셀(배경/깨진 부분)  → 제외
+            # 여러 노치가 있는 경우도 한 번에 처리됨 (Kasa 원 전체 피팅)
             if obj_measurement.str_category == "particle":
-                arr_mask_corrected = self._correct_occluded_mask(arr_mask)
-                if not np.array_equal(arr_mask_corrected, arr_mask):
-                    arr_notch = arr_mask_corrected.astype(bool) & ~arr_mask.astype(bool)
-                    if arr_notch.any():
+                arr_mask_candidate = self._correct_occluded_mask(arr_mask)
+                if not np.array_equal(arr_mask_candidate, arr_mask):
+                    arr_notch_all = arr_mask_candidate.astype(bool) & ~arr_mask.astype(bool)
+                    if arr_notch_all.any():
                         arr_gray_roi = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
                         int_otsu, _ = cv2.threshold(
                             arr_gray_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                        float_notch_brightness = float(arr_gray_roi[arr_notch].mean())
-                        if float_notch_brightness >= float(int_otsu) * 0.75:
-                            # 밝음 → 다른 입자가 가림 → 복원 적용
-                            arr_mask = arr_mask_corrected
-                # 복원 여부와 무관하게 최종 마스크로 재측정 (보정계수 포함)
+                        # 밝은 픽셀만 추가 (convex hull 범위 내이므로 과도한 확장 없음)
+                        arr_bright_notch = arr_notch_all & (arr_gray_roi >= int(int_otsu) * 3 // 4)
+                        if arr_bright_notch.sum() > 30:
+                            arr_mask = (arr_mask.astype(bool) | arr_bright_notch).astype(arr_mask.dtype)
+                # 최종 측정: convex hull 둘레로 구형도 계산
+                # - hull: 표면 요철(texture) 제거 → 전체 형상의 구형도 측정
+                # - hull 둘레에는 계단 오차 없으므로 0.9528 보정 불필요
                 obj_final = self.measure_mask(
-                    arr_mask, int_index=int_index, float_confidence=float_confidence)
+                    arr_mask, int_index=int_index, float_confidence=float_confidence,
+                    bool_convexHullSphericity=True)
                 if obj_final is not None and obj_final.str_category == "particle":
                     obj_measurement = obj_final
 
