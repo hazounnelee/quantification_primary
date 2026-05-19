@@ -583,11 +583,12 @@ class Sam2AspectRatioService:
 
     @staticmethod
     def _correct_occluded_mask(arr_mask: np.ndarray) -> np.ndarray:
-        """가려진 입자의 오목 노치 영역을 convex hull로 채워 복원 후보 마스크를 반환한다.
+        """가려진 입자의 노치를 Kasa 원호(hull로 경계)로 채운 복원 후보 마스크를 반환한다.
 
-        Kasa 원은 이웃 입자 영역까지 확장될 수 있지만, convex hull은 현재 가시
-        경계 안쪽의 오목 영역만 채우므로 과도한 확장이 없다.
-        실제로 어떤 픽셀을 추가할지(밝은 픽셀만)는 process()에서 결정한다.
+        - Kasa 원: 가시 컨투어의 hull 포인트 피팅 → 매끄러운 원호로 노치를 채움
+        - Hull 경계: Kasa 원을 hull 내부로 클리핑 → 이웃 입자 영역 침범 방지
+        - 복원 마스크의 컨투어가 자연스럽게 원형에 가까워진다.
+        실제 추가 여부(밝은 픽셀만)는 process()에서 결정한다.
         """
         list_cnts, _ = cv2.findContours(arr_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not list_cnts:
@@ -608,10 +609,25 @@ class Sam2AspectRatioService:
         if float_solidity < 0.50 or float_solidity > 0.95:
             return arr_mask
 
-        # convex hull 내부를 채워 후보 마스크 생성
+        # Kasa 최소제곱 원 피팅 (hull 포인트)
+        result = Sam2AspectRatioService._fit_particle_circle(arr_mask)
+        if result is None:
+            return arr_mask
+        float_cx, float_cy, float_r = result
+
+        # Kasa 원을 그린 뒤 hull 내부로 클리핑 → 매끄러운 호 + 이웃 침범 방지
         arr_hull_filled = np.zeros_like(arr_mask)
         cv2.fillPoly(arr_hull_filled, [arr_hull], 1)
-        return arr_hull_filled
+        arr_circle = np.zeros_like(arr_mask)
+        cv2.circle(arr_circle,
+                   (int(round(float_cx)), int(round(float_cy))), int(round(float_r)), 1, -1)
+        # 복원 후보 = 원본 | (Kasa 원 ∩ hull)
+        arr_candidate = (arr_mask.astype(bool)
+                         | (arr_circle.astype(bool) & arr_hull_filled.astype(bool))
+                         ).astype(arr_mask.dtype)
+        if float(arr_candidate.sum()) <= float(arr_mask.sum()) * 1.02:
+            return arr_mask
+        return arr_candidate
 
     @staticmethod
     def _split_peanut_mask(
@@ -1465,16 +1481,17 @@ class Sam2AspectRatioService:
                 float_s = float(arr_scores[int_index])
                 float_confidence = None if math.isnan(float_s) else float_s
 
-            # 초기 분류(particle/fragment 판별)용 측정
+            # 원본 마스크로 측정 — 구형도는 이 값을 사용한다.
+            # 원본 컨투어(노치 포함) + 0.9528 보정 → 가시 형상의 실제 구형도 반영
+            # (노치가 있으면 S < 1, 완전한 원이면 S ≈ 1)
+            arr_mask_original = arr_mask.copy()
             obj_measurement = self.measure_mask(
                 arr_mask, int_index=int_index, float_confidence=float_confidence)
             if obj_measurement is None:
                 continue
 
-            # ② 가려진 입자 복원: 노치 영역을 픽셀별 밝기로 판단
-            # - 밝은 픽셀(다른 입자가 가림) → 추가
-            # - 어두운 픽셀(배경/깨진 부분)  → 제외
-            # 여러 노치가 있는 경우도 한 번에 처리됨 (Kasa 원 전체 피팅)
+            # ② 가려진 입자 복원: 면적/직경 정확도를 위해 노치 밝기 기반으로 채움
+            # 구형도는 원본 마스크 값을 유지 (복원 마스크로 재측정하지 않음)
             if obj_measurement.str_category == "particle":
                 arr_mask_candidate = self._correct_occluded_mask(arr_mask)
                 if not np.array_equal(arr_mask_candidate, arr_mask):
@@ -1483,18 +1500,17 @@ class Sam2AspectRatioService:
                         arr_gray_roi = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
                         int_otsu, _ = cv2.threshold(
                             arr_gray_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                        # 밝은 픽셀만 추가 (convex hull 범위 내이므로 과도한 확장 없음)
                         arr_bright_notch = arr_notch_all & (arr_gray_roi >= int(int_otsu) * 3 // 4)
                         if arr_bright_notch.sum() > 30:
                             arr_mask = (arr_mask.astype(bool) | arr_bright_notch).astype(arr_mask.dtype)
-                # 최종 측정: convex hull 둘레로 구형도 계산
-                # - hull: 표면 요철(texture) 제거 → 전체 형상의 구형도 측정
-                # - hull 둘레에는 계단 오차 없으므로 0.9528 보정 불필요
-                obj_final = self.measure_mask(
-                    arr_mask, int_index=int_index, float_confidence=float_confidence,
-                    bool_convexHullSphericity=True)
-                if obj_final is not None and obj_final.str_category == "particle":
-                    obj_measurement = obj_final
+                # 복원 마스크로 면적/직경/bbox 갱신, 구형도는 원본 값 유지
+                obj_geom = self.measure_mask(
+                    arr_mask, int_index=int_index, float_confidence=float_confidence)
+                if obj_geom is not None and obj_geom.str_category == "particle":
+                    obj_measurement = dataclasses_replace(
+                        obj_geom,
+                        float_sphericity=obj_measurement.float_sphericity,
+                    )
 
             list_objects.append(obj_measurement)
             list_validMasks.append(
