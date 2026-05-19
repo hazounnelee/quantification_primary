@@ -1447,21 +1447,30 @@ class Sam2AspectRatioService:
                 float_s = float(arr_scores[int_index])
                 float_confidence = None if math.isnan(float_s) else float_s
 
+            # 구형도는 원본 마스크(가시 영역)의 convex hull 둘레로 측정한다.
+            # - convex hull: 노치(occluded) 부분의 오목 경계선을 제거해 가림 아티팩트 제거
+            # - 복원된 원(cv2.circle)의 이산 경계로 구형도를 재측정하면 픽셀화 아티팩트로
+            #   완전한 원도 S≈0.9가 나오므로, 구형도는 항상 원본 마스크에서 구한다.
             obj_measurement = self.measure_mask(
-                arr_mask, int_index=int_index, float_confidence=float_confidence)
+                arr_mask, int_index=int_index, float_confidence=float_confidence,
+                bool_convexHullSphericity=True)
             if obj_measurement is None:
                 continue
 
             # ② 가려진 입자 보정: particle 분류된 경우에만 원 피팅으로 복원
-            # 보정 후 측정값도 갱신해야 sphericity/area가 정확해진다
+            # 면적/직경은 복원 마스크로 갱신하되, 구형도는 원본 가시 영역 값을 유지한다.
             if obj_measurement.str_category == "particle":
                 arr_mask_corrected = self._correct_occluded_mask(arr_mask)
                 if not np.array_equal(arr_mask_corrected, arr_mask):
                     arr_mask = arr_mask_corrected
-                    obj_remeasured = self.measure_mask(
+                    obj_geom = self.measure_mask(
                         arr_mask, int_index=int_index, float_confidence=float_confidence)
-                    if obj_remeasured is not None and obj_remeasured.str_category == "particle":
-                        obj_measurement = obj_remeasured
+                    if obj_geom is not None and obj_geom.str_category == "particle":
+                        # 면적/직경/bbox/centroid = 복원 마스크, 구형도 = 원본 마스크
+                        obj_measurement = dataclasses_replace(
+                            obj_geom,
+                            float_sphericity=obj_measurement.float_sphericity,
+                        )
 
             list_objects.append(obj_measurement)
             list_validMasks.append(
