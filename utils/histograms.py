@@ -58,9 +58,6 @@ def save_particle_distribution_histogram(
     obj_fig = Figure(figsize=(10, 6), dpi=100)
     obj_ax = obj_fig.add_subplot(111)
     try:
-        obj_ax.set_title(f"{str_lot} — Secondary Particle Size", fontsize=18)
-        obj_ax.set_xlabel("Equivalent Diameter (µm)", fontsize=14)
-        obj_ax.set_ylabel("Count", fontsize=14)
         obj_ax.tick_params(labelsize=12)
 
         if list_sizes:
@@ -68,16 +65,9 @@ def save_particle_distribution_histogram(
             int_bins = int(np.clip(np.sqrt(len(arr_v)), 5, 20))
             float_mean = float(np.mean(arr_v))
             obj_ax.hist(arr_v, bins=int_bins, alpha=0.65, color="#5588ff",
-                        edgecolor="#333333", linewidth=0.8, label="Particle")
+                        edgecolor="#333333", linewidth=0.8)
             obj_ax.axvline(float_mean, linestyle="--", linewidth=1.5, color="#5588ff")
-            obj_ax.text(float_mean, obj_ax.get_ylim()[1] * 0.95,
-                        f"  mean: {float_mean:.3f} µm",
-                        color="#5588ff", fontsize=11, va="top")
-            obj_ax.legend(fontsize=12)
             obj_ax.grid(axis="y", linestyle="--", alpha=0.3)
-        else:
-            obj_ax.text(0.5, 0.5, "No particle data", ha="center", va="center",
-                        transform=obj_ax.transAxes, fontsize=13, color="#666666")
 
         obj_fig.tight_layout()
         obj_fig.savefig(str(path_outputImage), bbox_inches="tight")
@@ -96,9 +86,6 @@ def save_sphericity_distribution_histogram(
     obj_fig = Figure(figsize=(10, 6), dpi=100)
     obj_ax = obj_fig.add_subplot(111)
     try:
-        obj_ax.set_title(f"{str_lot} — Secondary Particle Sphericity", fontsize=18)
-        obj_ax.set_xlabel("Sphericity", fontsize=14)
-        obj_ax.set_ylabel("Count", fontsize=14)
         obj_ax.tick_params(labelsize=12)
 
         if list_sphs:
@@ -106,17 +93,10 @@ def save_sphericity_distribution_histogram(
             int_bins = int(np.clip(np.sqrt(len(arr_v)), 5, 20))
             float_mean = float(np.mean(arr_v))
             obj_ax.hist(arr_v, bins=int_bins, alpha=0.65, color="#44cc44",
-                        edgecolor="#333333", linewidth=0.8, label="Particle")
+                        edgecolor="#333333", linewidth=0.8)
             obj_ax.axvline(float_mean, linestyle="--", linewidth=1.5, color="#44cc44")
-            obj_ax.text(float_mean, obj_ax.get_ylim()[1] * 0.95,
-                        f"  mean: {float_mean:.3f}",
-                        color="#44cc44", fontsize=11, va="top")
             obj_ax.set_xlim(0, 0.99)
-            obj_ax.legend(fontsize=12)
             obj_ax.grid(axis="y", linestyle="--", alpha=0.3)
-        else:
-            obj_ax.text(0.5, 0.5, "No sphericity data", ha="center", va="center",
-                        transform=obj_ax.transAxes, fontsize=13, color="#666666")
 
         obj_fig.tight_layout()
         obj_fig.savefig(str(path_outputImage), bbox_inches="tight")
@@ -153,21 +133,16 @@ def _draw_quartile_hist(
         obj_ax.set_xlim(right=float_xlim_max)
 
     float_ymax = obj_ax.get_ylim()[1]
-    obj_ax.axvspan(float_q1, float_q3, alpha=0.12, color=str_color,
-                   label=f"IQR  [{float_q1:.3f} – {float_q3:.3f}]{str_unit}")
+    obj_ax.axvspan(float_q1, float_q3, alpha=0.12, color=str_color)
 
-    for float_val, str_lbl, str_lc, float_yf, str_ls in [
-        (float_q1,   "Q1",     "#cc6600", 0.95, ":"),
-        (float_q2,   "Q2",     "#cc0000", 0.82, ":"),
-        (float_q3,   "Q3",     "#cc6600", 0.95, ":"),
-        (float_mean, "mean",   str_color, 0.68, "--"),
+    for float_val, str_lc, str_ls in [
+        (float_q1,   "#cc6600", ":"),
+        (float_q2,   "#cc0000", ":"),
+        (float_q3,   "#cc6600", ":"),
+        (float_mean, str_color, "--"),
     ]:
         obj_ax.axvline(float_val, linestyle=str_ls, linewidth=1.6, color=str_lc)
-        obj_ax.text(float_val, float_ymax * float_yf,
-                    f" {str_lbl}\n {float_val:.3f}{str_unit}",
-                    color=str_lc, fontsize=9, va="top")
 
-    obj_ax.legend(fontsize=10)
     obj_ax.grid(axis="y", linestyle="--", alpha=0.3)
 
 
@@ -185,9 +160,6 @@ def _save_batch_hist(
     obj_fig = Figure(figsize=(10, 6), dpi=100)
     obj_ax = obj_fig.add_subplot(111)
     try:
-        obj_ax.set_title(str_title, fontsize=14)
-        obj_ax.set_xlabel(str_xlabel, fontsize=12)
-        obj_ax.set_ylabel("Count", fontsize=12)
         obj_ax.tick_params(labelsize=11)
 
         if list_vals:
@@ -510,42 +482,33 @@ def save_lot_particle_scatter_histogram(
 
     try:
         # ── 히스토그램 ──────────────────────────────────────────────────
-        obj_ax_hist.set_title(
-            f"{str_prefix}Particle Size — All Objects  "
-            f"(particle={len(list_particle_sizes)}, fragment={len(list_fragment_sizes)})",
-            fontsize=13)
-        obj_ax_hist.set_ylabel("Count", fontsize=11)
         obj_ax_hist.tick_params(labelsize=10)
         obj_ax_hist.set_xlim(float_xmin, float_xmax)
 
         int_bins = int(np.clip(np.sqrt(len(list_all)), 8, 40))
 
-        for list_vals, str_label, str_color in [
-            (list_particle_sizes, "Particle", "#5588ff"),
-            (list_fragment_sizes, "Fragment", "#ff6622"),
+        for list_vals, str_color in [
+            (list_particle_sizes, "#5588ff"),
+            (list_fragment_sizes, "#ff6622"),
         ]:
             if list_vals:
                 obj_ax_hist.hist(
                     list_vals, bins=int_bins, alpha=0.55, color=str_color,
-                    edgecolor="#333333", linewidth=0.6, label=str_label,
+                    edgecolor="#333333", linewidth=0.6,
                     range=(float_xmin, float_xmax),
                 )
 
         float_mean_all = float(np.mean(arr_all))
         float_std_all  = float(np.std(arr_all))
-        obj_ax_hist.axvline(float_mean_all, color="#222222", linewidth=1.5, linestyle="--",
-                            label=f"mean={float_mean_all:.3f} µm")
+        obj_ax_hist.axvline(float_mean_all, color="#222222", linewidth=1.5, linestyle="--")
         obj_ax_hist.axvline(float_mean_all - 1.96 * float_std_all,
                             color="#888888", linewidth=1.0, linestyle=":")
         obj_ax_hist.axvline(float_mean_all + 1.96 * float_std_all,
                             color="#888888", linewidth=1.0, linestyle=":")
-        obj_ax_hist.legend(fontsize=10)
         obj_ax_hist.grid(axis="y", linestyle="--", alpha=0.3)
         obj_ax_hist.tick_params(labelbottom=False)
 
         # ── 1D 산점도 (rug) ─────────────────────────────────────────────
-        obj_ax_scat.set_xlabel("Equivalent Diameter (µm)", fontsize=11)
-        obj_ax_scat.set_ylabel("", fontsize=1)
         obj_ax_scat.set_ylim(0, 1)
         obj_ax_scat.tick_params(left=False, labelleft=False, labelsize=10)
         obj_ax_scat.set_xlim(float_xmin, float_xmax)
