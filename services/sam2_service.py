@@ -896,19 +896,12 @@ class Sam2AspectRatioService:
 
         float_sphericity = None
         if str_category == "particle":
-            arr_perimContour = cv2.convexHull(arr_contour) if bool_convexHullSphericity else arr_contour
-            float_perimeter = float(cv2.arcLength(arr_perimContour, closed=True))
-            if float_perimeter > 0.0:
-                if bool_convexHullSphericity:
-                    # hull 둘레는 꼭짓점 간 유클리드 거리 합산 → 계단 오차 없음 → 보정 불필요
-                    float_perimeter_corrected = float_perimeter
-                else:
-                    # 원본 컨투어: Bresenham 계단이 실제 둘레보다 +4.95% 과다측정
-                    # 이론값 8(√2-1)/π ≈ 1.055, 실측 ≈ 1.0495 → 보정계수 0.9528
-                    float_perimeter_corrected = float_perimeter * 0.9528
-                float_sphericity = min(1.0, float(
-                    (4.0 * np.pi * int_maskArea) / (float_perimeter_corrected ** 2)
-                ))
+            # S = (D_equiv/D_max)² × (D_min/D_max)³  ≡  (b/a)⁵ for an ellipse
+            # - 원: S = 1.0  |  a/b=1.1: S≈0.62  |  a/b=1.2: S≈0.40  |  a/b=1.5: S≈0.13
+            float_D_equiv = float_eqDiameterPx
+            float_D_max = float(max(int_horizontal, int_vertical, 1))
+            float_D_min = float(max(min(int_horizontal, int_vertical), 1))
+            float_sphericity = min(1.0, (float_D_equiv / float_D_max) ** 2 * (float_D_min / float_D_max) ** 3)
 
         return ObjectMeasurement(
             int_index=int_index,
