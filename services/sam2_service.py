@@ -551,15 +551,13 @@ class Sam2AspectRatioService:
         if float_area == 0:
             return None
 
-        float_perim = cv2.arcLength(arr_cnt, True)
-        float_circ = 4.0 * np.pi * float_area / max(float_perim ** 2, 1.0)
-        if float_circ >= 0.80:
-            return None
-
         arr_hull = cv2.convexHull(arr_cnt)
         float_hull_area = float(cv2.contourArea(arr_hull))
         float_solidity = float_area / max(float_hull_area, 1.0)
-        if float_solidity < 0.50 or float_solidity > 0.95:
+        # solidity < 0.50: 심하게 불규칙(fragment) → skip
+        # 상한은 두지 않음: gain > 1.02 체크가 자연 상한 역할
+        # (solidity > 1/1.02 ≈ 0.98 이면 gain < 1.02 → 어차피 복원 안 됨)
+        if float_solidity < 0.50:
             return None
 
         # Kasa 최소제곱 원 피팅 (hull 포인트만 사용)
@@ -598,15 +596,10 @@ class Sam2AspectRatioService:
         if float_area == 0:
             return arr_mask
 
-        float_perim = cv2.arcLength(arr_cnt, True)
-        float_circ = 4.0 * np.pi * float_area / max(float_perim ** 2, 1.0)
-        if float_circ >= 0.80:
-            return arr_mask
-
         arr_hull = cv2.convexHull(arr_cnt)
         float_hull_area = float(cv2.contourArea(arr_hull))
         float_solidity = float_area / max(float_hull_area, 1.0)
-        if float_solidity < 0.50 or float_solidity > 0.95:
+        if float_solidity < 0.50:
             return arr_mask
 
         # Kasa 최소제곱 원 피팅 (hull 포인트)
@@ -625,7 +618,7 @@ class Sam2AspectRatioService:
         arr_candidate = (arr_mask.astype(bool)
                          | (arr_circle.astype(bool) & arr_hull_filled.astype(bool))
                          ).astype(arr_mask.dtype)
-        if float(arr_candidate.sum()) <= float(arr_mask.sum()) * 1.02:
+        if float(arr_candidate.sum()) <= float(arr_mask.sum()) * 1.005:
             return arr_mask
         return arr_candidate
 
@@ -1500,8 +1493,8 @@ class Sam2AspectRatioService:
                         arr_gray_roi = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
                         int_otsu, _ = cv2.threshold(
                             arr_gray_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                        arr_bright_notch = arr_notch_all & (arr_gray_roi >= int(int_otsu) * 3 // 4)
-                        if arr_bright_notch.sum() > 30:
+                        arr_bright_notch = arr_notch_all & (arr_gray_roi >= int(int_otsu) * 2 // 3)
+                        if arr_bright_notch.sum() > 5:
                             arr_mask = (arr_mask.astype(bool) | arr_bright_notch).astype(arr_mask.dtype)
                 # 복원 마스크로 면적/직경/bbox 갱신, 구형도는 원본 값 유지
                 obj_geom = self.measure_mask(
