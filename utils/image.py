@@ -207,9 +207,6 @@ def sample_prompt_points(
     # ── foreground mask via Otsu ────────────────────────────────────────────
     arr_blur = cv2.GaussianBlur(arr_tileGray, (5, 5), 0)
     _, arr_fg = cv2.threshold(arr_blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    # Ensure foreground = minority (particles are usually the smaller area)
-    if float(arr_fg.sum()) / (255.0 * int_h * int_w) > 0.5:
-        arr_fg = cv2.bitwise_not(arr_fg)
     arr_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     arr_fg = cv2.morphologyEx(arr_fg, cv2.MORPH_CLOSE, arr_kernel, iterations=2)
     arr_fg = cv2.morphologyEx(arr_fg, cv2.MORPH_OPEN,  arr_kernel, iterations=1)
@@ -258,12 +255,13 @@ def sample_prompt_points(
 
 
 def _find_fg_mask(arr_tileGray: np.ndarray) -> np.ndarray:
-    """Otsu threshold + morph cleanup → foreground (minority) binary mask."""
-    int_h, int_w = arr_tileGray.shape[:2]
+    """Otsu threshold + morph cleanup → foreground (bright particles) binary mask.
+
+    SEM secondary particle images always have bright particles on dark background,
+    so THRESH_BINARY keeps bright=foreground without inversion.
+    """
     arr_blur = cv2.GaussianBlur(arr_tileGray, (5, 5), 0)
     _, arr_fg = cv2.threshold(arr_blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    if float(arr_fg.sum()) / (255.0 * int_h * int_w) > 0.5:
-        arr_fg = cv2.bitwise_not(arr_fg)
     arr_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     arr_fg = cv2.morphologyEx(arr_fg, cv2.MORPH_CLOSE, arr_k, iterations=2)
     arr_fg = cv2.morphologyEx(arr_fg, cv2.MORPH_OPEN,  arr_k, iterations=1)
@@ -416,6 +414,11 @@ def detect_watershed_prompts(
         maxRadius=int_max_r,
     )
 
+    # Otsu threshold to reject circle centers that fall in dark background gaps
+    int_otsu_val, _ = cv2.threshold(
+        cv2.GaussianBlur(arr_tileGray, (5, 5), 0), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+    )
+
     list_pos: tp.List[tp.Tuple[int, int]] = []
     arr_circles_mask = np.zeros((int_h, int_w), dtype=np.uint8)  # HCT 원이 커버하는 영역
     if arr_circles is not None:
@@ -423,6 +426,14 @@ def detect_watershed_prompts(
         for (float_x, float_y, float_r) in arr_circles[0]:
             int_x, int_y = int(round(float_x)), int(round(float_y))
             if margin <= int_x < int_w - margin and margin <= int_y < int_h - margin:
+                # Verify circle center lands in a bright (particle) region, not a dark gap
+                int_sr = max(3, int(float_r * 0.25))
+                arr_patch = arr_tileGray[
+                    max(0, int_y - int_sr): min(int_h, int_y + int_sr),
+                    max(0, int_x - int_sr): min(int_w, int_x + int_sr),
+                ]
+                if arr_patch.size == 0 or float(arr_patch.mean()) < float(int_otsu_val) * 0.85:
+                    continue  # dark gap between particles — skip
                 list_pos.append((int_x, int_y))
                 cv2.circle(arr_circles_mask, (int_x, int_y), int(round(float_r)), 255, -1)
 
@@ -453,6 +464,9 @@ def detect_watershed_prompts(
     for int_lbl in range(1, int_n_uc):
         arr_blob = (arr_uc_labels == int_lbl).astype(np.uint8)
         if arr_blob.sum() < int_minArea // 4:  # fragment는 더 작을 수 있으므로 기준 완화
+            continue
+        # Reject dark blobs (background gaps between packed particles)
+        if float(arr_tileGray[arr_blob > 0].mean()) < float(int_otsu_val):
             continue
         int_peak = int(np.argmax(arr_uc_dist * arr_blob.astype(np.float32)))
         int_py, int_px = divmod(int_peak, int_w)
