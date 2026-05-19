@@ -897,11 +897,14 @@ class Sam2AspectRatioService:
         float_sphericity = None
         float_sphericity_prime = None
         if str_category == "particle":
-            # S: bbox 기반 (b/a)⁵ — 빠르고 안정적, 기울어진 타원엔 취약
-            float_D_equiv = float_eqDiameterPx
-            float_D_max = float(max(int_horizontal, int_vertical, 1))
-            float_D_min = float(max(min(int_horizontal, int_vertical), 1))
-            float_sphericity = min(1.0, (float_D_equiv / float_D_max) ** 2 * (float_D_min / float_D_max) ** 3)
+            # S: 4πA/P² (원형도, circularity) — 둘레와 면적 기반
+            arr_perimContour = cv2.convexHull(arr_contour) if bool_convexHullSphericity else arr_contour
+            float_perimeter = float(cv2.arcLength(arr_perimContour, closed=True))
+            if float_perimeter > 0.0:
+                float_perimeter_corrected = float_perimeter if bool_convexHullSphericity else float_perimeter * 0.9528
+                float_sphericity = min(1.0, float(
+                    (4.0 * np.pi * int_maskArea) / (float_perimeter_corrected ** 2)
+                ))
 
             # S': fitEllipse 기반 (b/a)⁵ — 기울어진 타원도 올바르게 측정
             if len(arr_contour) >= 5:
@@ -976,10 +979,9 @@ class Sam2AspectRatioService:
             if obj_measurement.str_category == "particle":
                 list_lines = []
                 if obj_measurement.float_sphericity is not None:
-                    str_s = f"S={obj_measurement.float_sphericity:.2f}"
-                    if obj_measurement.float_sphericity_prime is not None:
-                        str_s += f" S'={obj_measurement.float_sphericity_prime:.2f}"
-                    list_lines.append(str_s)
+                    list_lines.append(f"S={obj_measurement.float_sphericity:.2f}")
+                if obj_measurement.float_sphericity_prime is not None:
+                    list_lines.append(f"S'={obj_measurement.float_sphericity_prime:.2f}")
                 if list_lines:
                     draw_label_no_overlap(
                         arr_overlay, list_lines, int_cx2, int_cy2, tpl_color, list_placedRects)

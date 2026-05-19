@@ -62,7 +62,7 @@ class ObjectMeasurement:
     float_longestHorizontalUm: float
     float_longestVerticalUm: float
     float_eqDiameterUm: float
-    float_sphericity: tp.Optional[float]        # S  = (b/a)⁵  bbox 기반
+    float_sphericity: tp.Optional[float]        # S  = 4πA/P²  (원형도, circularity)
     float_sphericity_prime: tp.Optional[float]  # S' = (b/a)⁵  fitEllipse 기반
 
 
