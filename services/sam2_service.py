@@ -1489,8 +1489,9 @@ class Sam2AspectRatioService:
                     float_hull_area = float(cv2.contourArea(cv2.convexHull(arr_cnt_s)))
                     float_solidity = float_cnt_area / max(float_hull_area, 1.0)
 
-                # 오목한 노치가 있는 입자만 Kasa + 밝기 필터로 부분 복원
+                # 오목한 노치가 있는 입자만 Kasa + 밝기 필터로 부분 복원 후 hull
                 # (solidity < 0.97 = 3% 이상 오목 영역 존재)
+                bool_restored = False
                 if float_solidity < 0.97:
                     result = self._fit_particle_circle(arr_mask)
                     if result is not None:
@@ -1506,15 +1507,15 @@ class Sam2AspectRatioService:
                         arr_bright = arr_notch & (arr_gray_roi >= int(int_otsu) * 3 // 4)
                         if arr_bright.sum() > 50:
                             arr_mask = (arr_mask.astype(bool) | arr_bright).astype(arr_mask.dtype)
+                            bool_restored = True
 
-                # 모든 입자에 hull 적용 (볼록 → 변화없음, 오목 → 나머지 채움)
-                arr_mask = self._hull_mask(arr_mask)
+                    # 복원이 일어난 경우에만 hull로 나머지 마감
+                    if bool_restored:
+                        arr_mask = self._hull_mask(arr_mask)
 
-                # 면적/직경/구형도 모두 hull 마스크 기준
-                # hull 컨투어는 계단 오차 없으므로 convexHullSphericity=True (0.9528 보정 없음)
                 obj_geom = self.measure_mask(
                     arr_mask, int_index=int_index, float_confidence=float_confidence,
-                    bool_convexHullSphericity=True)
+                    bool_convexHullSphericity=bool_restored)
                 if obj_geom is not None and obj_geom.str_category == "particle":
                     obj_measurement = obj_geom
 
