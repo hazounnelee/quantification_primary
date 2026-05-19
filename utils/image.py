@@ -457,16 +457,17 @@ def detect_watershed_prompts(
     # ── 3. HCT 미커버 전경 블롭 → fragment/비원형 입자 프롬프트 추가 ─────
     arr_fg = _find_fg_mask(arr_tileGray)
     arr_uncovered = cv2.bitwise_and(arr_fg, cv2.bitwise_not(arr_circles_mask))
-    arr_k7 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-    arr_uncovered = cv2.morphologyEx(arr_uncovered, cv2.MORPH_OPEN, arr_k7, iterations=1)
+    # 3×3 opening: 1px 노이즈만 제거, 작은 fragment 보존 (기존 7×7은 너무 많이 지웠음)
+    arr_k3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    arr_uncovered = cv2.morphologyEx(arr_uncovered, cv2.MORPH_OPEN, arr_k3, iterations=1)
     int_n_uc, arr_uc_labels = cv2.connectedComponents(arr_uncovered)
     arr_uc_dist = cv2.distanceTransform(arr_uncovered, cv2.DIST_L2, 5)
     for int_lbl in range(1, int_n_uc):
         arr_blob = (arr_uc_labels == int_lbl).astype(np.uint8)
-        if arr_blob.sum() < int_minArea // 4:  # fragment는 더 작을 수 있으므로 기준 완화
+        if arr_blob.sum() < int_minArea // 8:  # 기준 완화: ~190px (기존 375px)
             continue
-        # Reject dark blobs (background gaps between packed particles)
-        if float(arr_tileGray[arr_blob > 0].mean()) < float(int_otsu_val):
+        # fragment는 부분적으로 어두울 수 있어 0.75× Otsu로 완화 (기존 1.0×)
+        if float(arr_tileGray[arr_blob > 0].mean()) < float(int_otsu_val) * 0.75:
             continue
         int_peak = int(np.argmax(arr_uc_dist * arr_blob.astype(np.float32)))
         int_py, int_px = divmod(int_peak, int_w)
