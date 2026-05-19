@@ -538,13 +538,18 @@ class Sam2AspectRatioService:
 
     @staticmethod
     def _correct_occluded_mask(arr_mask: np.ndarray) -> np.ndarray:
-        """가려진 입자 마스크를 convex hull로 부분 복원한다 (particle 전용).
+        """가려진 입자 마스크를 최소제곱 원 피팅(Kasa method)으로 복원한다 (particle 전용).
 
-        완전한 원형 대신 convex hull을 사용해 실제로 가려진 부분만 보수적으로 복원한다:
-        - convex hull = 오목한 '깎인' 부분을 채우되 외접원보다 훨씬 보수적
-        - circularity 낮고 solidity 높은 경우(원호 모양)에만 적용
+        convex hull은 오목한 원호 패임을 직선 현(chord)으로만 메우지만,
+        Kasa 원 피팅은 보이는 호 전체를 연립방정식으로 풀어 원의 중심·반지름을
+        역산하므로 실제 구면에 가까운 원형 복원이 가능하다.
+
+        적용 조건:
+        - circularity < 0.65: 충분히 원형이 아닌 경우만
+        - solidity 0.50–0.90: 너무 불규칙(fragment)하거나 거의 완전한 경우 제외
+        - 피팅된 원 면적이 원본 면적의 4배 이하 (과도한 확대 방지)
         """
-        list_cnts, _ = cv2.findContours(arr_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        list_cnts, _ = cv2.findContours(arr_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
         if not list_cnts:
             return arr_mask
         arr_cnt = max(list_cnts, key=cv2.contourArea)
@@ -554,23 +559,46 @@ class Sam2AspectRatioService:
 
         float_perim = cv2.arcLength(arr_cnt, True)
         float_circ = 4.0 * np.pi * float_area / max(float_perim ** 2, 1.0)
-        # 이미 충분히 원형이면 보정 불필요
-        if float_circ >= 0.65:
+        # 겹침으로 생기는 원호 패임은 circularity 0.65–0.80 범위에 집중
+        if float_circ >= 0.80:
             return arr_mask
 
-        # convex hull 면적 비교: 솔리디티 낮은 건 불규칙 형태 → 건드리지 않음
         arr_hull = cv2.convexHull(arr_cnt)
-        float_hull_area = cv2.contourArea(arr_hull)
+        float_hull_area = float(cv2.contourArea(arr_hull))
         float_solidity = float_area / max(float_hull_area, 1.0)
-        # solidity < 0.5: 너무 불규칙 (fragment) → skip
-        # fill_ratio > 0.85: 거의 다 보임 → 보정 불필요
-        float_fill_ratio = float_area / max(float_hull_area, 1.0)
-        if float_solidity < 0.50 or float_fill_ratio > 0.85:
+        # solidity < 0.50: 불규칙 형태(fragment) → skip
+        # solidity > 0.95: 패임이 매우 작아 보정 불필요
+        if float_solidity < 0.50 or float_solidity > 0.95:
             return arr_mask
 
-        # convex hull로 채움 (완전한 원 대신 실제 가려진 오목 부분만 복원)
+        # Kasa 최소제곱 원 피팅: x²+y² = 2cx·x + 2cy·y + (r²-cx²-cy²)
+        arr_pts = arr_cnt.reshape(-1, 2).astype(np.float64)
+        arr_z = arr_pts[:, 0] ** 2 + arr_pts[:, 1] ** 2
+        arr_A = np.column_stack([2.0 * arr_pts[:, 0], 2.0 * arr_pts[:, 1], np.ones(len(arr_pts))])
+        arr_res, _, _, _ = np.linalg.lstsq(arr_A, arr_z, rcond=None)
+        float_cx = float(arr_res[0])
+        float_cy = float(arr_res[1])
+        float_r2 = float(arr_res[2]) + float_cx ** 2 + float_cy ** 2
+        if float_r2 <= 0:
+            return arr_mask
+        float_r = float(np.sqrt(float_r2))
+
+        # 반지름 sanity: 면적 기반 예상 반지름의 0.7–1.8배 이내
+        float_r_expected = float(np.sqrt(float_area / np.pi))
+        if float_r < float_r_expected * 0.7 or float_r > float_r_expected * 1.8:
+            return arr_mask
+
+        # 피팅 원 면적이 원본의 4배 초과 → 너무 작은 호, 피팅 신뢰 불가
+        if np.pi * float_r ** 2 > float_area * 4.0:
+            return arr_mask
+
+        int_h, int_w = arr_mask.shape[:2]
         arr_corrected = np.zeros_like(arr_mask)
-        cv2.fillPoly(arr_corrected, [arr_hull], 1)
+        cv2.circle(arr_corrected, (int(round(float_cx)), int(round(float_cy))), int(round(float_r)), 1, -1)
+
+        # 복원된 마스크가 원본보다 의미 있게 커야 적용 (최소 2% 증가)
+        if float(arr_corrected.sum()) <= float(arr_mask.sum()) * 1.02:
+            return arr_mask
         return arr_corrected
 
     @staticmethod
@@ -1426,9 +1454,16 @@ class Sam2AspectRatioService:
             if obj_measurement is None:
                 continue
 
-            # ② 가려진 입자 보정: particle 분류된 경우에만 convex hull 복원
+            # ② 가려진 입자 보정: particle 분류된 경우에만 원 피팅으로 복원
+            # 보정 후 측정값도 갱신해야 sphericity/area가 정확해진다
             if obj_measurement.str_category == "particle":
-                arr_mask = self._correct_occluded_mask(arr_mask)
+                arr_mask_corrected = self._correct_occluded_mask(arr_mask)
+                if not np.array_equal(arr_mask_corrected, arr_mask):
+                    arr_mask = arr_mask_corrected
+                    obj_remeasured = self.measure_mask(
+                        arr_mask, int_index=int_index, float_confidence=float_confidence)
+                    if obj_remeasured is not None and obj_remeasured.str_category == "particle":
+                        obj_measurement = obj_remeasured
 
             list_objects.append(obj_measurement)
             list_validMasks.append(
