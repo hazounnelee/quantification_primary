@@ -600,42 +600,38 @@ class Sam2AspectRatioService:
         return arr_out
 
     @staticmethod
-    def _erode_background_boundary(
+    def _trim_captured_background(
         arr_mask: np.ndarray,
         arr_roiBgr: np.ndarray,
-        float_low_grad_trigger: float = 0.35,
-        int_erode_px: int = 4,
+        int_near: int = 3,
+        int_far: int = 9,
+        float_trigger: float = 35.0,
     ) -> np.ndarray:
-        """경계 픽셀 중 저그라디언트 비율이 높으면(배경 포함 의심) erosion으로 제거한다.
+        """경계 안쪽 얕은 영역(near)과 깊은 영역(far)의 밝기를 비교한다.
 
-        float_low_grad_trigger: 경계 픽셀 중 저그라디언트 비율이 이 값 초과 시 erosion 적용.
+        far - near > float_trigger 이면 배경이 외곽에 포함된 것으로 판단해
+        near 두께만큼 erosion으로 제거한다.
+
+        - 정상 경계: near = 밝음(입자 표면), far ≈ near → 차이 작음
+        - 배경 포함:  near = 어두움(배경), far = 밝음(입자 내부) → 차이 큼
         """
         arr_gray = cv2.cvtColor(arr_roiBgr, cv2.COLOR_BGR2GRAY)
-        arr_gx = cv2.Sobel(arr_gray, cv2.CV_32F, 1, 0, ksize=3)
-        arr_gy = cv2.Sobel(arr_gray, cv2.CV_32F, 0, 1, ksize=3)
-        arr_grad = np.sqrt(arr_gx ** 2 + arr_gy ** 2)
+        arr_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
 
-        float_gmax = float(arr_grad.max())
-        if float_gmax < 1e-6:
+        arr_eroded_near = cv2.erode(arr_mask.astype(np.uint8), arr_k, iterations=int_near)
+        arr_eroded_far  = cv2.erode(arr_mask.astype(np.uint8), arr_k, iterations=int_far)
+
+        arr_band_near = arr_mask.astype(bool) & ~arr_eroded_near.astype(bool)
+        arr_band_far  = arr_eroded_near.astype(bool) & ~arr_eroded_far.astype(bool)
+
+        if not arr_band_near.any() or not arr_band_far.any():
             return arr_mask
 
-        # 경계(두께 2px) 픽셀에서 정규화 그라디언트 샘플링
-        arr_boundary = np.zeros_like(arr_mask, dtype=np.uint8)
-        list_cnts, _ = cv2.findContours(arr_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-        if not list_cnts:
-            return arr_mask
-        cv2.drawContours(arr_boundary, list_cnts, -1, 1, thickness=2)
+        float_mean_near = float(arr_gray[arr_band_near].mean())
+        float_mean_far  = float(arr_gray[arr_band_far].mean())
 
-        arr_bvals = (arr_grad / float_gmax)[arr_boundary > 0]
-        if len(arr_bvals) == 0:
-            return arr_mask
-
-        # 저그라디언트 = 정규화값 < 0.08 (평탄한 배경 영역)
-        float_low_ratio = float((arr_bvals < 0.08).mean())
-        if float_low_ratio > float_low_grad_trigger:
-            arr_kernel = cv2.getStructuringElement(
-                cv2.MORPH_ELLIPSE, (int_erode_px * 2 + 1, int_erode_px * 2 + 1))
-            arr_mask = cv2.erode(arr_mask, arr_kernel, iterations=1)
+        if float_mean_far - float_mean_near > float_trigger:
+            arr_mask = arr_eroded_near.astype(arr_mask.dtype)
 
         return arr_mask
 
@@ -1547,17 +1543,9 @@ class Sam2AspectRatioService:
                         if arr_bright.sum() > 50:
                             arr_mask = (arr_mask.astype(bool) | arr_bright).astype(arr_mask.dtype)
 
-                # hull 적용 — 단, 추가된 픽셀 중 밝은 것만 수락 (어두우면 배경)
-                arr_hull = self._hull_mask(arr_mask)
-                arr_added = arr_hull.astype(bool) & ~arr_mask.astype(bool)
-                if arr_added.any():
-                    arr_gray_roi = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
-                    int_otsu, _ = cv2.threshold(
-                        arr_gray_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                    arr_added_ok = arr_added & (arr_gray_roi >= int_otsu * 3 // 4)
-                    arr_mask = (arr_mask.astype(bool) | arr_added_ok).astype(arr_mask.dtype)
-                else:
-                    arr_mask = arr_hull
+                # 모든 입자에 hull 적용 후 내부 방향 밝기 프로파일로 배경 포함 감지
+                arr_mask = self._hull_mask(arr_mask)
+                arr_mask = self._trim_captured_background(arr_mask, arr_inputRoiBgr)
 
                 obj_geom = self.measure_mask(
                     arr_mask, int_index=int_index, float_confidence=float_confidence,
