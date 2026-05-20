@@ -898,14 +898,16 @@ class Sam2AspectRatioService:
         float_sphericity = None
         float_sphericity_prime = None
         if str_category == "particle":
-            # S: 4πA/P² (원형도, circularity) — 둘레와 면적 기반
-            arr_perimContour = cv2.convexHull(arr_contour) if bool_convexHullSphericity else arr_contour
-            float_perimeter = float(cv2.arcLength(arr_perimContour, closed=True))
-            if float_perimeter > 0.0:
-                float_perimeter_corrected = float_perimeter if bool_convexHullSphericity else float_perimeter * 0.9528
-                float_sphericity = min(1.0, float(
-                    (4.0 * np.pi * int_maskArea) / (float_perimeter_corrected ** 2)
-                ))
+            # S: 4πA/P² — A와 P를 같은 볼록 폴리곤에서 계산해야
+            # 이소페리메트릭 부등식(S≤1)이 항상 성립.
+            # convexHull로 계단 노이즈를 제거하고 A/P 모두 hull 폴리곤 기준으로 통일.
+            arr_hull_cnt = cv2.convexHull(arr_contour)
+            float_hull_area = float(cv2.contourArea(arr_hull_cnt))
+            float_perimeter = float(cv2.arcLength(arr_hull_cnt, closed=True))
+            if float_perimeter > 0.0 and float_hull_area > 0.0:
+                float_sphericity = float(
+                    (4.0 * np.pi * float_hull_area) / (float_perimeter ** 2)
+                )
 
             # S': fitEllipse 기반 (b/a)⁵ — 기울어진 타원도 올바르게 측정
             if len(arr_contour) >= 5:
@@ -1527,7 +1529,11 @@ class Sam2AspectRatioService:
                     arr_mask, int_index=int_index, float_confidence=float_confidence,
                     bool_convexHullSphericity=True)
                 if obj_geom is not None and obj_geom.str_category == "particle":
-                    obj_measurement = obj_geom
+                    # 면적·크기·S'은 hull 기준, S는 원본 마스크 컨투어 기준 유지
+                    obj_measurement = dataclasses_replace(
+                        obj_geom,
+                        float_sphericity=obj_measurement.float_sphericity,
+                    )
 
             list_objects.append(obj_measurement)
             list_validMasks.append(
