@@ -319,7 +319,7 @@ def run_secondary_particle_analysis(
         )
         obj_svc = SecondaryParticleService(cfg_dev)
         if not bool_useOpenCV:
-            print(f"[batch] init model on {str_dev or 'auto'}: {list_firstImages[0].name}", flush=True)
+            print(f"[batch] model initialized on {str_dev or 'auto'}", flush=True)
             obj_svc.initialize_model()
         list_gpu_services.append(obj_svc)
 
