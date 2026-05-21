@@ -909,13 +909,13 @@ class Sam2AspectRatioService:
                     (4.0 * np.pi * float_hull_area) / (float_perimeter ** 2)
                 )
 
-            # S': fitEllipse 기반 (b/a)⁵ — 기울어진 타원도 올바르게 측정
+            # S': fitEllipse 기반 b/a — 장단축비 (aspect ratio)
             if len(arr_contour) >= 5:
                 _, (float_ew, float_eh), _ = cv2.fitEllipse(arr_contour)
                 float_fit_a = max(float_ew, float_eh) / 2.0
                 float_fit_b = min(float_ew, float_eh) / 2.0
                 if float_fit_a > 0:
-                    float_sphericity_prime = min(1.0, (float_fit_b / float_fit_a) ** 5)
+                    float_sphericity_prime = min(1.0, float_fit_b / float_fit_a)
 
         return ObjectMeasurement(
             int_index=int_index,
