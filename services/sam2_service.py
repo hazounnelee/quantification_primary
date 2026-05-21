@@ -1537,56 +1537,55 @@ class Sam2AspectRatioService:
                 if float_mean_brightness < float_brightness_thresh:
                     continue
 
-            # 원본 마스크 측정 — 구형도(S)는 이 값 사용
-            obj_measurement = self.measure_mask(
+            # 원본 마스크 측정 — S(구형도)만 이 값 사용
+            obj_measurement_orig = self.measure_mask(
                 arr_mask, int_index=int_index, float_confidence=float_confidence)
+            if obj_measurement_orig is None:
+                continue
+            float_sphericity_orig = obj_measurement_orig.float_sphericity
+
+            # 솔리디티 계산 → 오목한 마스크에 Kasa 복원 적용
+            list_cnts_s, _ = cv2.findContours(
+                arr_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            float_solidity = 1.0
+            if list_cnts_s:
+                arr_cnt_s = max(list_cnts_s, key=cv2.contourArea)
+                float_cnt_area = float(cv2.contourArea(arr_cnt_s))
+                float_hull_area = float(cv2.contourArea(cv2.convexHull(arr_cnt_s)))
+                float_solidity = float_cnt_area / max(float_hull_area, 1.0)
+
+            if float_solidity < 0.97:
+                result = self._fit_particle_circle(arr_mask)
+                if result is not None:
+                    float_cx, float_cy, float_r = result
+                    arr_circle = np.zeros_like(arr_mask)
+                    cv2.circle(arr_circle,
+                               (int(round(float_cx)), int(round(float_cy))),
+                               int(round(float_r)), 1, -1)
+                    arr_notch = arr_circle.astype(bool) & ~arr_mask.astype(bool)
+                    arr_bright = arr_notch & (arr_gray_roi >= int(int_otsu_global) * 3 // 4)
+                    if arr_bright.sum() > 50:
+                        arr_mask = (arr_mask.astype(bool) | arr_bright).astype(arr_mask.dtype)
+
+                    cv2.circle(arr_restoration_viz,
+                               (int(round(float_cx)), int(round(float_cy))),
+                               int(round(float_r)), (0, 200, 255), 1)
+                    arr_restoration_viz[arr_bright.astype(bool)] = (255, 80, 0)
+
+            # 모든 마스크에 hull 적용 → hull 기준 면적으로 분류
+            arr_mask = self._hull_mask(arr_mask)
+
+            obj_measurement = self.measure_mask(
+                arr_mask, int_index=int_index, float_confidence=float_confidence,
+                bool_convexHullSphericity=True)
             if obj_measurement is None:
                 continue
 
-            if obj_measurement.str_category == "particle":
-                # 솔리디티 계산 — 이미 볼록(convex)한 입자는 Kasa 복원 불필요
-                list_cnts_s, _ = cv2.findContours(
-                    arr_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                float_solidity = 1.0
-                if list_cnts_s:
-                    arr_cnt_s = max(list_cnts_s, key=cv2.contourArea)
-                    float_cnt_area = float(cv2.contourArea(arr_cnt_s))
-                    float_hull_area = float(cv2.contourArea(cv2.convexHull(arr_cnt_s)))
-                    float_solidity = float_cnt_area / max(float_hull_area, 1.0)
-
-                # 오목한 노치가 있는 입자: Kasa + 밝기 필터로 부분 복원
-                # (solidity < 0.97 = 3% 이상 오목 영역 존재)
-                if float_solidity < 0.97:
-                    result = self._fit_particle_circle(arr_mask)
-                    if result is not None:
-                        float_cx, float_cy, float_r = result
-                        arr_circle = np.zeros_like(arr_mask)
-                        cv2.circle(arr_circle,
-                                   (int(round(float_cx)), int(round(float_cy))),
-                                   int(round(float_r)), 1, -1)
-                        arr_notch = arr_circle.astype(bool) & ~arr_mask.astype(bool)
-                        arr_bright = arr_notch & (arr_gray_roi >= int(int_otsu_global) * 3 // 4)
-                        if arr_bright.sum() > 50:
-                            arr_mask = (arr_mask.astype(bool) | arr_bright).astype(arr_mask.dtype)
-
-                        # 복원 시각화: Kasa 원(노란 원), 추가된 픽셀(파란색)
-                        cv2.circle(arr_restoration_viz,
-                                   (int(round(float_cx)), int(round(float_cy))),
-                                   int(round(float_r)), (0, 200, 255), 1)
-                        arr_restoration_viz[arr_bright.astype(bool)] = (255, 80, 0)
-
-                # 모든 입자에 hull 적용
-                arr_mask = self._hull_mask(arr_mask)
-
-                obj_geom = self.measure_mask(
-                    arr_mask, int_index=int_index, float_confidence=float_confidence,
-                    bool_convexHullSphericity=True)
-                if obj_geom is not None and obj_geom.str_category == "particle":
-                    # 면적·크기·S'은 hull 기준, S는 원본 마스크 컨투어 기준 유지
-                    obj_measurement = dataclasses_replace(
-                        obj_geom,
-                        float_sphericity=obj_measurement.float_sphericity,
-                    )
+            # 면적·크기·S'·분류는 hull 기준, S는 원본 컨투어 기준 유지
+            obj_measurement = dataclasses_replace(
+                obj_measurement,
+                float_sphericity=float_sphericity_orig,
+            )
 
             list_objects.append(obj_measurement)
             list_validMasks.append(
