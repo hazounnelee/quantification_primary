@@ -1203,6 +1203,7 @@ class Sam2AspectRatioService:
         dict_debug: tp.Dict[str, tp.Any],
         arr_raw_masks: tp.Optional[np.ndarray] = None,
         arr_restoration_viz: tp.Optional[np.ndarray] = None,
+        arr_brightness_filter_viz: tp.Optional[np.ndarray] = None,
     ) -> None:
         """이미지, CSV, JSON, histogram 등 최종 산출물을 저장한다.
 
@@ -1299,6 +1300,10 @@ class Sam2AspectRatioService:
 
         if arr_restoration_viz is not None:
             cv2.imwrite(str(self.obj_config.path_outputDir / "restoration.png"), arr_restoration_viz)
+
+        if arr_brightness_filter_viz is not None:
+            cv2.imwrite(str(self.obj_config.path_outputDir / "brightness_filter.png"),
+                        arr_brightness_filter_viz)
 
         path_csvAll = self.obj_config.path_outputDir / "objects.csv"
         with path_csvAll.open("w", newline="", encoding="utf-8-sig") as obj_f:
@@ -1489,6 +1494,36 @@ class Sam2AspectRatioService:
             arr_gray_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         float_brightness_thresh = float(int_otsu_global) * 0.5
 
+        # 밝기 필터 디버그 오버레이: 통과(녹)·제거(적) 마스크와 Otsu 배수 표시
+        int_h_viz, int_w_viz = arr_inputRoiBgr.shape[:2]
+        arr_bf_viz = cv2.resize(arr_inputRoiBgr,
+                                (int_w_viz * 2, int_h_viz * 2),
+                                interpolation=cv2.INTER_LINEAR)
+        list_bf_placed: tp.List[tp.Tuple[int, int, int, int]] = []
+        for arr_m in arr_masks:
+            arr_mb = arr_m.astype(bool)
+            if not arr_mb.any():
+                continue
+            float_mb = float(arr_gray_roi[arr_mb].mean())
+            float_ratio = float_mb / float(int_otsu_global) if int_otsu_global > 0 else 0.0
+            bool_pass = float_mb >= float_brightness_thresh
+            tpl_tint = (40, 200, 40) if bool_pass else (40, 40, 220)
+            arr_m2 = cv2.resize(arr_m, (int_w_viz * 2, int_h_viz * 2),
+                                interpolation=cv2.INTER_NEAREST)
+            arr_bf_viz[arr_m2 > 0] = (
+                arr_bf_viz[arr_m2 > 0].astype(np.float32) * 0.55
+                + np.array(tpl_tint, dtype=np.float32) * 0.45
+            ).astype(np.uint8)
+            cnts_bf, _ = cv2.findContours(arr_m2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if cnts_bf:
+                cv2.drawContours(arr_bf_viz, cnts_bf, -1, tpl_tint, 1)
+                M = cv2.moments(max(cnts_bf, key=cv2.contourArea))
+                if M["m00"] > 0:
+                    int_cx = int(M["m10"] / M["m00"])
+                    int_cy = int(M["m01"] / M["m00"])
+                    draw_label_no_overlap(
+                        arr_bf_viz, [f"{float_ratio:.2f}x"],
+                        int_cx, int_cy, tpl_tint, list_bf_placed)
         for int_index, arr_mask in enumerate(arr_masks):
             float_confidence = None
             if arr_scores is not None and int_index < len(arr_scores):
@@ -1579,6 +1614,7 @@ class Sam2AspectRatioService:
             dict_debug,
             arr_raw_masks=arr_masks,
             arr_restoration_viz=arr_restoration_viz,
+            arr_brightness_filter_viz=arr_bf_viz,
         )
 
         return Sam2AspectRatioResult(
