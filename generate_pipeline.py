@@ -425,128 +425,135 @@ def draw_secondary():
     ax.annotate("", xy=(XC, 23.95), xytext=(XC, 24.15),
                 arrowprops=dict(arrowstyle="->", color=LC, lw=1.4), zorder=1)
 
+    # ── _find_fg_mask ──────────────────────────────────────────────────────────
+    box(ax, XC, 23.6, BW, 0.65,
+        "_find_fg_mask()  →  arr_fg  (③ 미커버 보완 · ④ 네거티브 샘플링 공용)\n"
+        "GaussBlur(5×5)  →  Otsu threshold  →  MORPH_CLOSE(5×5,×2)  →  OPEN(5×5,×1)",
+        color=C_PREP, fs=7.8)
+    dn(23.275, 22.825)
+
     # ── 미커버 블롭 보완 ────────────────────────────────────────────────────────
-    box(ax, XC, 23.6, BW, 0.7,
+    box(ax, XC, 22.5, BW, 0.65,
         "미커버 전경 보완\n"
-        "fg AND NOT circles_mask → connectedComponents → 블롭별 거리변환 peak  (fragment · 비원형 입자)",
+        "arr_fg AND NOT circles_mask → connectedComponents → 블롭별 거리변환 peak  (fragment · 비원형 입자)",
         color=C_SAM2, fs=7.8)
-    dn(23.25, 22.8)
+    dn(22.175, 21.725)
 
     # ── 네거티브 샘플링 ─────────────────────────────────────────────────────────
-    box(ax, XC, 22.5, BW, 0.6,
-        "네거티브 샘플링  ~fg → erode(×4) → linspace N개 균등 샘플링",
+    box(ax, XC, 21.4, BW, 0.6,
+        "네거티브 샘플링  ~arr_fg → erode(×4) → linspace N개 균등 샘플링",
         color=C_SAM2, fs=7.8)
-    dn(22.2, 21.7); sep(21.5)
+    dn(21.1, 20.55); sep(20.35)
 
     # ── SAM2 ──────────────────────────────────────────────────────────────────
-    box(ax, XC, 21.1, BW, 0.8,
+    box(ax, XC, 20.0, BW, 0.8,
         "SAM2 배치 추론  (Ultralytics)\n"
         "포지티브 (label=1) + 네거티브 (label=0)  ·  batch_size=32\n"
         "raw logit mask → binarize  (mask_binarize_threshold=0.0)",
         color=C_SAM2, fs=7.8)
-    dn(20.7, 20.2); sep(20.0)
+    dn(19.6, 19.1); sep(18.9)
 
     # ── DEDUP ─────────────────────────────────────────────────────────────────
-    box(ax, XC, 19.55, BW, 1.0,
+    box(ax, XC, 18.45, BW, 1.0,
         "마스크 중복 제거  (DEDUP)\n"
         "① bbox IoU ≥ 0.85 → reject  [tile-level fast filter]\n"
         "② binary mask IoU ≥ 0.60 → reject  [ROI-level]\n"
         "③ 포함 관계: inter / small_area ≥ 0.75 → reject  [ROI-level]",
         color=C_SAM2, fs=7.8)
-    dn(19.05, 18.55)
+    dn(17.95, 17.45)
 
     # ── POSTPROCESS ───────────────────────────────────────────────────────────
-    box(ax, XC, 18.1, BW, 0.85,
+    box(ax, XC, 17.0, BW, 0.85,
         "마스크 후처리  (SMOOTH + PEANUT SPLIT)\n"
         "Smooth: MORPH_CLOSE(5×5,×2) + OPEN(5×5,×1) → 최대 연결 컴포넌트 유지\n"
         "Peanut split: minAreaRect AR < 0.6 → 거리변환 2-peak → Watershed 분리",
         color=C_SAM2, fs=7.8)
-    dn(17.675, 17.175); sep(16.975)
+    dn(16.575, 16.075); sep(15.875)
 
     # ── PUNCH-OUT ─────────────────────────────────────────────────────────────
-    box(ax, XC, 16.6, BW, 0.75,
+    box(ax, XC, 15.5, BW, 0.75,
         "포함 마스크 펀치아웃  (PUNCH-OUT)\n"
         "작은 마스크 J가 큰 마스크 I에 97%+ 포함 → I에서 J 픽셀 제거\n"
         "→ 입자 테두리만 남겨 밝기 필터의 판별 정확도 향상",
         color=C_SAM2, fs=7.8)
-    dn(16.225, 15.775)
+    dn(15.125, 14.675)
 
     # ── DIAMOND: 밝기 필터 ─────────────────────────────────────────────────────
-    diamond(ax, XC, 15.4, 7.0, 0.75, "마스크 평균 밝기\n< Otsu × 0.5?", fs=7.8)
-    ax.text(12.5, 15.4, "NO", fontsize=7.5, color="#555", fontweight="bold", va="center")
-    ax.text(3.5, 15.4, "YES", fontsize=7.5, color=C_BRANCH, fontweight="bold", va="center", ha="right")
+    diamond(ax, XC, 14.3, 7.0, 0.75, "마스크 평균 밝기\n< Otsu × 0.5?", fs=7.8)
+    ax.text(12.5, 14.3, "NO", fontsize=7.5, color="#555", fontweight="bold", va="center")
+    ax.text(3.5, 14.3, "YES", fontsize=7.5, color=C_BRANCH, fontweight="bold", va="center", ha="right")
 
     # YES → left → 마스크 제거 (dead-end)
-    hline(4.5, 1.8, 15.4)
-    box(ax, 1.2, 15.4, 1.5, 0.6, "마스크\n제거", color=C_BRANCH, fs=7.5)
+    hline(4.5, 1.8, 14.3)
+    box(ax, 1.2, 14.3, 1.5, 0.6, "마스크\n제거", color=C_BRANCH, fs=7.5)
 
     # NO → straight down
-    dn(15.025, 14.575)
+    dn(13.925, 13.475)
 
     # ── DIAMOND: Kasa 복원 조건 ────────────────────────────────────────────────
-    diamond(ax, XC, 14.2, 7.5, 0.75, "solidity < 0.97\nor 직선≥15px\nor ROI 경계?", fs=7.5)
-    ax.text(12.6, 14.2, "YES", fontsize=7.5, color=C_MEAS, fontweight="bold", va="center")
-    ax.text(3.25, 14.2, "NO", fontsize=7.5, color="#555", fontweight="bold", va="center", ha="right")
+    diamond(ax, XC, 13.1, 7.5, 0.75, "solidity < 0.97\nor 직선≥15px\nor ROI 경계?", fs=7.5)
+    ax.text(12.6, 13.1, "YES", fontsize=7.5, color=C_MEAS, fontweight="bold", va="center")
+    ax.text(3.25, 13.1, "NO", fontsize=7.5, color="#555", fontweight="bold", va="center", ha="right")
 
     # YES → right → Kasa box
-    hline(11.75, 13.8, 14.2); side_arr(13.8, 14.2, 13.65)
-    box(ax, 13.8, 13.1, 3.8, 1.1,
+    hline(11.75, 13.8, 13.1); side_arr(13.8, 13.1, 12.55)
+    box(ax, 13.8, 12.0, 3.8, 1.1,
         "Kasa 원 피팅\nhull pts → 최소제곱\n(cx, cy, r)\n검증: solidity·CV·면적비\n밝은 픽셀(≥Otsu×0.75) 복원",
         color=C_MEAS, fs=7.0)
 
     # Kasa box bottom → merge
-    vline(13.8, 12.55, 12.3); hline(8.0, 13.8, 12.3)
+    vline(13.8, 11.45, 11.2); hline(8.0, 13.8, 11.2)
 
     # NO → straight down from diamond bottom, meets merge
-    vline(XC, 13.825, 12.3)
-    ax.annotate("", xy=(XC, 12.1), xytext=(XC, 12.3),
+    vline(XC, 12.725, 11.2)
+    ax.annotate("", xy=(XC, 11.0), xytext=(XC, 11.2),
                 arrowprops=dict(arrowstyle="->", color=LC, lw=1.4), zorder=1)
 
     # ── HULL MASK ─────────────────────────────────────────────────────────────
-    box(ax, XC, 11.75, BW, 0.7,
+    box(ax, XC, 10.65, BW, 0.7,
         "Hull 마스크 적용\n"
         "convex hull fill 적용  →  면적·크기·S'·분류 모두 hull 기준    (S 원형도는 원본 컨투어 유지)",
         color=C_MEAS, fs=7.8)
-    dn(11.4, 10.9)
+    dn(10.3, 9.8)
 
     # ── HULL MERGE ────────────────────────────────────────────────────────────
-    box(ax, XC, 10.55, BW, 0.7,
+    box(ax, XC, 9.45, BW, 0.7,
         "Hull 마스크 97%+ 겹침 병합  (UNION-FIND)\n"
         "inter / min_area ≥ 0.97 → Union-Find 그룹화 → 합집합(OR) 마스크로 병합 후 재측정",
         color=C_MEAS, fs=7.8)
-    dn(10.2, 9.7); sep(9.5)
+    dn(9.1, 8.5); sep(8.3)
 
     # ── MEASUREMENT ───────────────────────────────────────────────────────────
-    box(ax, XC, 9.05, BW, 1.0,
+    box(ax, XC, 7.95, BW, 1.0,
         "측정  (MEASUREMENT)\n"
         "S   = 4π × hull_area / hull_perimeter²             [원형도, Wadell 2D]  ←  원본 컨투어 hull\n"
         "S'  = b / a  (cv2.fitEllipse 단축 / 장축비)         [타원도]  ←  hull 마스크 컨투어\n"
         "eq_diameter = 2 × √(hull_area / π)  →  × (µm/px)  [등가원 지름]",
         color=C_MEAS, fs=7.8)
-    dn(8.55, 8.05)
+    dn(7.45, 6.95)
 
     # ── DIAMOND: 분류 ──────────────────────────────────────────────────────────
-    diamond(ax, XC, 7.7, 6.0, 0.75, "hull_area ≥\n1500 px²?", fs=8.0)
-    ax.text(11.2, 7.7, "YES", fontsize=7.5, color=C_MEAS, fontweight="bold", va="center")
-    ax.text(4.8, 7.7, "NO", fontsize=7.5, color=C_COMMON, fontweight="bold", va="center", ha="right")
+    diamond(ax, XC, 6.6, 6.0, 0.75, "hull_area ≥\n1500 px²?", fs=8.0)
+    ax.text(11.2, 6.6, "YES", fontsize=7.5, color=C_MEAS, fontweight="bold", va="center")
+    ax.text(4.8, 6.6, "NO", fontsize=7.5, color=C_COMMON, fontweight="bold", va="center", ha="right")
 
     # YES → right → particle
-    hline(11.0, 12.8, 7.7); side_arr(12.8, 7.7, 7.25)
-    box(ax, 12.8, 6.95, 2.5, 0.6, "particle", color=C_MEAS, fs=8.5, bold=True)
+    hline(11.0, 12.8, 6.6); side_arr(12.8, 6.6, 6.15)
+    box(ax, 12.8, 5.85, 2.5, 0.6, "particle", color=C_MEAS, fs=8.5, bold=True)
 
     # NO → left → fragment
-    hline(5.0, 3.2, 7.7); side_arr(3.2, 7.7, 7.25)
-    box(ax, 3.2, 6.95, 2.5, 0.6, "fragment", color=C_COMMON, fs=8.5, bold=True)
+    hline(5.0, 3.2, 6.6); side_arr(3.2, 6.6, 6.15)
+    box(ax, 3.2, 5.85, 2.5, 0.6, "fragment", color=C_COMMON, fs=8.5, bold=True)
 
     # Merge both at bottom
-    vline(12.8, 6.65, 6.4); vline(3.2, 6.65, 6.4)
-    hline(3.2, 12.8, 6.4)
-    ax.annotate("", xy=(XC, 6.2), xytext=(XC, 6.4),
+    vline(12.8, 5.55, 5.3); vline(3.2, 5.55, 5.3)
+    hline(3.2, 12.8, 5.3)
+    ax.annotate("", xy=(XC, 5.1), xytext=(XC, 5.3),
                 arrowprops=dict(arrowstyle="->", color=LC, lw=1.4), zorder=1)
-    sep(6.05)
+    sep(4.95)
 
     # ── OUTPUT ────────────────────────────────────────────────────────────────
-    box(ax, XC, 5.55, BW, 0.9,
+    box(ax, XC, 4.45, BW, 0.9,
         "출력  (OUTPUT)\n"
         "input_roi.png  ·  classified.png  ·  overlay_roi.png  ·  summary.json\n"
         "[--debug]  tiles.png  prompts.png  objects.csv  size/sph_dist.png  overlay_S/Sp.png\n"
