@@ -7,7 +7,19 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.patches import FancyBboxPatch
 from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib import font_manager
 import numpy as np
+
+# ── 한글 폰트 설정 ─────────────────────────────────────────────────────────────
+_NANUM_PATH = (
+    "/System/Library/AssetsV2/com_apple_MobileAsset_Font8"
+    "/7a0b5c0f3c1d41c4c52a33343496c9c65ad52c50.asset/AssetData/NanumGothic.ttc"
+)
+try:
+    font_manager.fontManager.addfont(_NANUM_PATH)
+    matplotlib.rcParams["font.family"] = "Nanum Gothic"
+except Exception:
+    pass  # 폰트 없으면 경고만 뜨고 계속 진행
 
 # ── Colour palette ─────────────────────────────────────────────────────────────
 C_IO      = "#1D4ED8"   # blue     – input / output nodes
@@ -325,144 +337,174 @@ def draw_primary():
 # ── SECONDARY PIPELINE ─────────────────────────────────────────────────────────
 
 def draw_secondary():
-    fig = plt.figure(figsize=(14, 22))
+    fig = plt.figure(figsize=(14, 28))
     fig.patch.set_facecolor(BG)
     ax = fig.add_axes([0, 0, 1, 1])
     ax.set_xlim(0, 14)
-    ax.set_ylim(0, 22)
+    ax.set_ylim(0, 28)
     ax.set_aspect("equal")
     ax.axis("off")
     ax.set_facecolor(BG)
 
     XC = 7
-    BW = 11
-    BH = 1.0
+    BW = 12.8
 
-    def sep(y): ax.plot([0.4, 13.6], [y, y], color="#CBD5E1", lw=0.6, ls="--", zorder=0)
+    def sep(y): ax.plot([0.3, 13.7], [y, y], color="#CBD5E1", lw=0.6, ls="--", zorder=0)
     def dn(y1, y2): arr(ax, XC, y1, XC, y2)
 
     # Title
-    ax.text(XC, 21.3, "secondary_measure.py — Full Pipeline",
+    ax.text(XC, 27.55, "secondary_measure.py — 파이프라인",
             ha="center", fontsize=14, fontweight="bold", color="#1E293B")
-    ax.text(XC, 20.75, "Segment-Anything SAM2  →  particle / fragment classification\n"
-            "equivalent circle diameter  ·  sphericity  (µm)",
-            ha="center", fontsize=8.5, color="#475569", multialignment="center")
+    ax.text(XC, 27.05, "HCT 포인트 프롬프트  →  SAM2  →  Kasa 복원  →  hull 병합  →  S / S' / eq_d 측정",
+            ha="center", fontsize=8.5, color="#475569")
+    sep(26.75)
 
-    # Input
-    box(ax, XC, 19.9, BW, BH,
-        "INPUT  —  SEM image (.jpg / .png / .tiff / …)\n"
-        "single file  or  batch directory",
+    # ── INPUT ─────────────────────────────────────────────────────────────────
+    box(ax, XC, 26.3, BW, 0.75,
+        "INPUT  —  SEM image  (single file  or  batch directory)",
         color=C_IO, fs=8.5, bold=True)
-    dn(19.4, 18.85); sep(18.65)
+    dn(25.92, 25.42); sep(25.22)
 
-    # Preprocessing
-    box(ax, XC, 18.3, BW, BH,
-        "IMAGE NORMALISATION  (--preprocess_width W,  default 1024)\n"
-        "resize → W × round(W×1636/2048)  (bilinear)   ·   crop bottom round(W×100/2048) px\n"
-        "default:  1024 × 818  →  crop 50 px  →  1024 × 768",
-        color=C_PREP, fs=8)
-    dn(17.8, 17.25); sep(17.05)
+    # ── PREPROCESSING ─────────────────────────────────────────────────────────
+    box(ax, XC, 24.77, BW, 1.0,
+        "전처리  (IMAGE NORMALISATION)\n"
+        "resize → preprocess_width W (default 1024) × round(W×1636/2048)  [bilinear]\n"
+        "bottom crop: round(W×100/2048) px  스케일바 제거  →  default 1024 × 768",
+        color=C_PREP, fs=7.8)
+    dn(24.27, 23.77); sep(23.57)
 
-    # ROI
-    box(ax, XC, 16.55, BW, 0.95,
-        "ROI EXTRACTION\n"
-        "--roi_x_min/y_min/x_max/y_max  (default: full normalised image)\n"
-        "or auto_center_crop if enabled",
-        color=C_PREP, fs=8)
-    dn(16.07, 15.5); sep(15.3)
+    # ── ROI ───────────────────────────────────────────────────────────────────
+    box(ax, XC, 23.22, BW, 0.85,
+        "ROI 추출\n"
+        "--roi_x_min / y_min / x_max / y_max  직접 지정  (default: 전체 이미지)\n"
+        "또는  auto_center_crop 활성 시 center crop",
+        color=C_PREP, fs=7.8)
+    dn(22.79, 22.29); sep(22.09)
 
-    # Tiling
-    box(ax, XC, 14.85, BW, BH,
-        "TILE GRID\n"
-        "ROI → overlapping tiles  (tile_size=512 × stride=256)\n"
-        "edge tiles extended  ·  duplicates deduplicated",
-        color=C_SAM2, fs=8)
-    dn(14.35, 13.8)
+    # ── TILE GRID ─────────────────────────────────────────────────────────────
+    box(ax, XC, 21.69, BW, 0.8,
+        "타일 분할  (SLIDING WINDOW TILE GRID)\n"
+        "ROI → 겹치는 tile grid  (tile_size=512, stride=256)  ·  경계 타일 확장  ·  중복 제거",
+        color=C_SAM2, fs=7.8)
+    dn(21.29, 20.79)
 
-    # Texture
-    box(ax, XC, 13.3, BW, BH,
-        "TEXTURE ENHANCEMENT  (per tile)\n"
-        "CLAHE  +  Sobel gradient  +  Laplacian  +  morphological blackhat\n"
-        "→  single enhanced grayscale channel",
-        color=C_SAM2, fs=8)
-    dn(12.8, 12.25)
+    # ── HCT PROMPTS ───────────────────────────────────────────────────────────
+    box(ax, XC, 19.59, BW, 2.2,
+        "포인트 프롬프트 추출  detect_hct_prompts()  [per tile]\n\n"
+        "① HCT  (primary)\n"
+        "     GaussBlur(9×9) → HoughCircles → 각 원 중심 좌표\n"
+        "     밝기 검증: 중심 주변 patch 평균 < Otsu×0.85 → 배경 갭 오탐 제거\n"
+        "② fallback  (HCT 검출 0개 시)\n"
+        "     Canny → MORPH_CLOSE(7×7,×3) → RETR_CCOMP hole fill → 거리변환 peak\n"
+        "③ 미커버 전경 보완\n"
+        "     fg AND NOT circles_mask → connectedComponents → 블롭별 거리변환 peak\n"
+        "④ 네거티브  ~fg → erode(×4) → linspace N개 균등 샘플링",
+        color=C_SAM2, fs=7.5)
+    dn(18.49, 17.99)
 
-    # Point sampling
-    box(ax, XC, 11.75, BW, BH,
-        "INTEREST-POINT SAMPLING  (Shi-Tomasi)\n"
-        "cv2.goodFeaturesToTrack on enhanced tile\n"
-        "fallback: Otsu → contour centroids  (if sparse)\n"
-        "up to points_per_tile=80,  spacing ≥ point_min_distance=14 px",
-        color=C_SAM2, fs=8)
-    dn(11.25, 10.7)
+    # ── SAM2 ──────────────────────────────────────────────────────────────────
+    box(ax, XC, 17.54, BW, 0.85,
+        "SAM2 배치 추론  (Ultralytics)\n"
+        "포지티브 (label=1) + 네거티브 (label=0)  ·  batch_size=32\n"
+        "raw logit mask → binarize  (mask_binarize_threshold=0.0)",
+        color=C_SAM2, fs=7.8)
+    dn(17.11, 16.61); sep(16.41)
 
-    # SAM2
-    box(ax, XC, 10.2, BW, BH,
-        "SAM2 BATCH INFERENCE  (Ultralytics)\n"
-        "foreground point prompts  (label = 1),  batch_size = 32 points per call\n"
-        "raw logit masks  →  binarise at mask_binarize_threshold = 0.0",
-        color=C_SAM2, fs=8)
-    dn(9.7, 9.15)
+    # ── DEDUP ─────────────────────────────────────────────────────────────────
+    box(ax, XC, 15.96, BW, 1.0,
+        "마스크 중복 제거  (DEDUP)\n"
+        "① bbox IoU ≥ 0.85 → reject  [tile-level fast filter]\n"
+        "② binary mask IoU ≥ 0.60 → reject  [ROI-level]\n"
+        "③ 포함 관계: inter / small_area ≥ 0.75 → reject  [ROI-level]",
+        color=C_SAM2, fs=7.8)
+    dn(15.46, 14.96)
 
-    # BBox dedup
-    box(ax, XC, 8.65, BW, BH,
-        "BOUNDING-BOX IoU DEDUP  (tile-level, fast)\n"
-        "reject mask if bbox IoU ≥ 0.85 with any accepted mask\n"
-        "promote tile-coord mask → ROI-coord mask",
-        color=C_SAM2, fs=8)
-    dn(8.15, 7.6)
+    # ── POSTPROCESS ───────────────────────────────────────────────────────────
+    box(ax, XC, 14.51, BW, 0.9,
+        "마스크 후처리  (POSTPROCESSING)\n"
+        "① Smooth: MORPH_CLOSE(5×5,×2) + OPEN(5×5,×1) → 최대 연결 컴포넌트만 유지\n"
+        "② Peanut split: minAreaRect AR < 0.6 → 거리변환 2-peak → Watershed 분리",
+        color=C_SAM2, fs=7.8)
+    dn(14.06, 13.56); sep(13.36)
 
-    # Pixel dedup
-    box(ax, XC, 7.1, BW, BH,
-        "PIXEL IoU DEDUP  (ROI-level)\n"
-        "binary mask IoU ≥ 0.60  →  reject as duplicate",
-        color=C_SAM2, fs=8)
-    dn(6.6, 6.05)
+    # ── PUNCH-OUT ─────────────────────────────────────────────────────────────
+    box(ax, XC, 12.96, BW, 0.8,
+        "포함 마스크 펀치아웃  (PUNCH-OUT)\n"
+        "작은 마스크 J가 큰 마스크 I에 97%+ 포함 → I에서 J 픽셀 제거\n"
+        "→ 입자 테두리만 남겨 밝기 필터가 선·배경을 정확히 판별하게 함",
+        color=C_SAM2, fs=7.8)
+    dn(12.56, 12.06)
 
-    # Morphology
-    box(ax, XC, 5.55, BW, BH,
-        "MASK REFINEMENT  (morphology, optional)\n"
-        "morphological open  (remove small spurs)\n"
-        "morphological close  (fill interior holes)",
-        color=C_SAM2, fs=8)
-    dn(5.05, 4.5); sep(4.3)
+    # ── BRIGHTNESS FILTER ─────────────────────────────────────────────────────
+    box(ax, XC, 11.66, BW, 0.8,
+        "밝기 필터  (BRIGHTNESS FILTER)\n"
+        "전체 ROI Otsu → brightness_thresh = Otsu × 0.5\n"
+        "마스크 영역 평균 밝기 < threshold → 배경 / SEM 선 아티팩트 → 제거",
+        color=C_PREP, fs=7.8)
+    dn(11.26, 10.76); sep(10.56)
 
-    # Measurement
-    box(ax, XC, 3.85, BW, 1.05,
-        "MEASUREMENT\n"
-        "eq_diameter_um  =  2 × √(mask_area / π)   →   px → µm  (Equivalent Circle Diameter)\n"
-        "sphericity      =  4π × mask_area / perimeter²   (Wadell 2D isoperimetric ratio)\n"
-        "--eq_diameter ON (default): size = eq_diameter   |   OFF: size = (spanH + spanV) / 2",
-        color=C_MEAS, fs=8)
-    dn(3.25, 2.75)
+    # ── KASA RESTORATION ──────────────────────────────────────────────────────
+    box(ax, XC, 9.96, BW, 1.4,
+        "부분 절단 입자 복원  (KASA CIRCLE FITTING)\n"
+        "조건: solidity < 0.97  OR  수평/수직 직선 구간 ≥15px (approxPolyDP)  OR  ROI 경계 접촉\n"
+        "→ convex hull 포인트에 Kasa 최소제곱 원 피팅  (cx, cy, r)\n"
+        "     검증: solidity ≥ 0.5  ·  CV(hull→원 거리) ≤ 10%  ·  면적비 이상 없음\n"
+        "→ 피팅 원 내부 중 밝은 픽셀 (≥ Otsu×0.75) 을 마스크에 추가 복원",
+        color=C_MEAS, fs=7.8)
+    dn(9.26, 8.76)
 
-    # Classification
-    box(ax, XC, 2.25, BW, 0.9,
-        "CLASSIFICATION\n"
-        "mask_area  <  area_threshold (1500 px²)  →  fragment\n"
-        "otherwise  →  particle",
-        color=C_MEAS, fs=8)
-    dn(1.8, 1.3); sep(1.1)
+    # ── HULL MASK ─────────────────────────────────────────────────────────────
+    box(ax, XC, 8.36, BW, 0.8,
+        "Hull 마스크 적용\n"
+        "모든 마스크에 convex hull fill 적용\n"
+        "→ 이후 면적·크기·S'·분류 모두 hull 기준    (S=원형도는 원본 컨투어 값 유지)",
+        color=C_MEAS, fs=7.8)
+    dn(7.96, 7.46)
 
-    # Outputs
-    box(ax, XC, 0.65, BW, 0.88,
-        "OUTPUTS  (per image)\n"
-        "01…04_*.png  overlay  |  objects.csv  particles.csv  fragment_masks/  particle_masks/\n"
-        "particle_dist.png  sphericity_dist.png  |  summary.json  objects.json  debug.json\n"
-        "Batch:  img_id_summary.json  ·  batch_summary.json",
+    # ── HULL MERGE ────────────────────────────────────────────────────────────
+    box(ax, XC, 7.01, BW, 0.85,
+        "Hull 마스크 97%+ 겹침 병합  (UNION-FIND)\n"
+        "inter / min_area ≥ 0.97 → Union-Find로 그룹화\n"
+        "같은 그룹 → 합집합(OR) 마스크로 병합 후 재측정",
+        color=C_MEAS, fs=7.8)
+    dn(6.58, 6.08); sep(5.88)
+
+    # ── MEASUREMENT ───────────────────────────────────────────────────────────
+    box(ax, XC, 5.43, BW, 1.1,
+        "측정  (MEASUREMENT)\n"
+        "S   = 4π × hull_area / hull_perimeter²           [원형도 Wadell 2D]  ←  원본 컨투어 hull\n"
+        "S'  = b / a  (cv2.fitEllipse 단축 / 장축비)       [타원도]  ←  hull 마스크 컨투어\n"
+        "eq_diameter = 2 × √(hull_area / π)  →  × (µm/px)  [등가원 지름]",
+        color=C_MEAS, fs=7.8)
+    dn(4.88, 4.38)
+
+    # ── CLASSIFICATION ────────────────────────────────────────────────────────
+    box(ax, XC, 3.98, BW, 0.8,
+        "분류  (CLASSIFICATION)\n"
+        "hull_area ≥ area_threshold (1500 px²) → particle\n"
+        "hull_area <  area_threshold             → fragment",
+        color=C_MEAS, fs=7.8)
+    dn(3.58, 3.08); sep(2.88)
+
+    # ── OUTPUT ────────────────────────────────────────────────────────────────
+    box(ax, XC, 2.43, BW, 0.9,
+        "출력  (OUTPUT)\n"
+        "input_roi.png  ·  classified.png  ·  overlay_roi.png  ·  summary.json\n"
+        "[--debug]  overlay_S/Sp.png  tiles.png  prompts.png  objects.csv  size/sph_dist.png\n"
+        "Batch:  img_id_summary.json  ·  batch_summary.json  ·  히스토그램 PNG",
         color=C_OUT, fs=7.8, bold=True)
 
     # Legend
     legend_patches = [
-        leg_patch(C_IO,   "Input / Output"),
-        leg_patch(C_PREP, "Preprocessing / ROI"),
-        leg_patch(C_SAM2, "SAM2 inference"),
-        leg_patch(C_MEAS, "Measurement / Classification"),
-        leg_patch(C_OUT,  "Output"),
+        leg_patch(C_IO,     "Input / Output"),
+        leg_patch(C_PREP,   "전처리 / ROI / 밝기 필터"),
+        leg_patch(C_SAM2,   "HCT / SAM2 / Dedup / Postprocess"),
+        leg_patch(C_MEAS,   "Kasa 복원 / Hull / 측정 / 분류"),
+        leg_patch(C_OUT,    "Output"),
     ]
     ax.legend(handles=legend_patches, loc="lower left",
-              bbox_to_anchor=(0.01, 0.00), fontsize=8,
-              framealpha=0.9, edgecolor="#CBD5E1", ncol=5,
+              bbox_to_anchor=(0.01, 0.005), fontsize=8,
+              framealpha=0.9, edgecolor="#CBD5E1", ncol=3,
               handlelength=1.2, handleheight=0.8)
 
     return fig
