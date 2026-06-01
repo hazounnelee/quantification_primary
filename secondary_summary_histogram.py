@@ -27,6 +27,10 @@ def main() -> None:
         "--lot", default=None,
         help="차트 제목에 표시할 lot 이름. 미지정 시 summary 파일의 부모 디렉토리명 사용.",
     )
+    obj_parser.add_argument(
+        "--ref_size", type=float, default=None,
+        help="RMSD 기준 입경 (µm). 대입경=10, 소입경=4. 미지정 시 RMSD 히스토그램 미생성.",
+    )
     obj_args = obj_parser.parse_args()
 
     path_summary = Path(obj_args.summary)
@@ -46,9 +50,13 @@ def main() -> None:
     print(f"[info] output : {path_outputDir}")
     print(f"[info] lot    : {str_lot}")
 
-    save_secondary_batch_histograms(dict_batchSummary, path_outputDir, str_lot=str_lot)
-    print("[done] batch_hist_size.png, batch_hist_size_per_image.png, batch_hist_size_std.png, "
-          "batch_hist_sphericity.png, batch_hist_sphericity_per_image.png, batch_hist_fine_ratio.png 저장 완료")
+    save_secondary_batch_histograms(
+        dict_batchSummary, path_outputDir,
+        str_lot=str_lot, float_size_ref=obj_args.ref_size,
+    )
+    str_extra = f"  batch_hist_size_rmsd.png" if obj_args.ref_size is not None else ""
+    print(f"[done] batch_hist_size.png, batch_hist_size_per_image.png, batch_hist_size_std.png, "
+          f"batch_hist_S/Sp.png, batch_hist_fine_ratio.png{str_extra} 저장 완료")
 
 
 if __name__ == "__main__":

@@ -156,6 +156,7 @@ def _save_batch_hist(
     float_xlim_min: tp.Optional[float] = None,
     float_xlim_max: tp.Optional[float] = None,
     int_bins_factor: int = 1,
+    float_vline_ref: tp.Optional[float] = None,
 ) -> None:
     obj_fig = Figure(figsize=(10, 6), dpi=100)
     obj_ax = obj_fig.add_subplot(111)
@@ -166,6 +167,13 @@ def _save_batch_hist(
             arr_v = np.array(list_vals, dtype=np.float64)
             _draw_quartile_hist(obj_ax, arr_v, str_color, str_unit,
                                 float_xlim_min, float_xlim_max, int_bins_factor)
+            if float_vline_ref is not None:
+                obj_ax.axvline(float_vline_ref, linestyle="-", linewidth=2.0,
+                               color="#cc0000", label=f"ref={float_vline_ref}{str_unit}")
+                float_ymax = obj_ax.get_ylim()[1]
+                obj_ax.text(float_vline_ref, float_ymax * 0.97,
+                            f" ref={float_vline_ref}{str_unit}",
+                            color="#cc0000", fontsize=9, va="top")
         else:
             obj_ax.text(0.5, 0.5, "No data", ha="center", va="center",
                         transform=obj_ax.transAxes, fontsize=13, color="#666666")
@@ -180,6 +188,7 @@ def save_secondary_batch_histograms(
     dict_batchSummary: tp.Dict[str, tp.Any],
     path_outputDir: Path,
     str_lot: str = "",
+    float_size_ref: tp.Optional[float] = None,
 ) -> None:
     """Save batch histograms for secondary (1차 입자) analysis.
 
@@ -194,6 +203,7 @@ def save_secondary_batch_histograms(
     list_sphs_prime: tp.List[float] = []
     list_fine: tp.List[float] = []
     list_size_stds: tp.List[float] = []
+    list_size_rmsds: tp.List[float] = []
     list_size_per_image: tp.List[float] = []
     list_sph_per_image: tp.List[float] = []
     list_sph_prime_per_image: tp.List[float] = []
@@ -222,14 +232,23 @@ def save_secondary_batch_histograms(
                     fv = _safe_float(v)
                     if fv is not None: list_sizes.append(fv)
 
+            fv_mean = _safe_float(dict_f.get("particle_mean_size_um"))
             v_std = dict_f.get("particle_size_std_um")
+            fv_std: tp.Optional[float] = None
             if v_std is not None:
-                fv = _safe_float(v_std)
-                if fv is not None: list_size_stds.append(fv)
+                fv_std = _safe_float(v_std)
+                if fv_std is not None: list_size_stds.append(fv_std)
             else:
                 list_raw = [r for r in (_safe_float(x) for x in (dict_f.get("particle_size_um_raw") or [])) if r is not None]
                 if len(list_raw) >= 2:
-                    list_size_stds.append(float(np.std(list_raw, ddof=1)))
+                    fv_std = float(np.std(list_raw, ddof=1))
+                    list_size_stds.append(fv_std)
+
+            if float_size_ref is not None and fv_mean is not None:
+                # RMSD from ref = sqrt(σ² + (μ - ref)²)
+                # σ=0으로 처리 (n=1 또는 std 없는 경우)
+                float_var = fv_std ** 2 if fv_std is not None else 0.0
+                list_size_rmsds.append(math.sqrt(float_var + (fv_mean - float_size_ref) ** 2))
 
             for key, lst in [
                 ("particle_mean_size_um",          list_size_per_image),
@@ -260,6 +279,7 @@ def save_secondary_batch_histograms(
         str_unit=" µm",
         float_xlim_min=float_size_xmin, float_xlim_max=float_size_xmax,
         int_bins_factor=5,
+        float_vline_ref=float_size_ref,
     )
     _save_batch_hist(
         list_vals=list_size_per_image,
@@ -270,6 +290,7 @@ def save_secondary_batch_histograms(
         str_unit=" µm",
         float_xlim_min=float_size_pi_xmin, float_xlim_max=float_size_pi_xmax,
         int_bins_factor=3,
+        float_vline_ref=float_size_ref,
     )
     _save_batch_hist(
         list_vals=list_size_stds,
@@ -280,6 +301,17 @@ def save_secondary_batch_histograms(
         str_unit=" µm",
         float_xlim_min=float_size_std_xmin, float_xlim_max=float_size_std_xmax,
     )
+    if float_size_ref is not None and list_size_rmsds:
+        float_rmsd_xmin, float_rmsd_xmax = _std_xlim(list_size_rmsds, float_hard_min=0.0)
+        _save_batch_hist(
+            list_vals=list_size_rmsds,
+            path_output=path_outputDir / "batch_hist_size_rmsd.png",
+            str_title=f"{str_prefix}Particle Size RMSD from {float_size_ref} µm — Batch Distribution (per-image)",
+            str_xlabel=f"RMSD from {float_size_ref} µm  [= √(σ² + (μ–{float_size_ref})²)]  (µm)",
+            str_color="#e06010",
+            str_unit=" µm",
+            float_xlim_min=float_rmsd_xmin, float_xlim_max=float_rmsd_xmax,
+        )
     _save_batch_hist(
         list_vals=list_sphs,
         path_output=path_outputDir / "batch_hist_S.png",
