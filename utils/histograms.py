@@ -132,16 +132,25 @@ def _draw_quartile_hist(
     elif float_xlim_max is not None:
         obj_ax.set_xlim(right=float_xlim_max)
 
-    float_ymax = obj_ax.get_ylim()[1]
     obj_ax.axvspan(float_q1, float_q3, alpha=0.12, color=str_color)
 
-    for float_val, str_lc, str_ls in [
-        (float_q1,   "#cc6600", ":"),
-        (float_q2,   "#cc0000", ":"),
-        (float_q3,   "#cc6600", ":"),
-        (float_mean, str_color, "--"),
-    ]:
+    _xform = obj_ax.get_xaxis_transform()  # x: data coords, y: axes fraction
+    for (float_val, str_lc, str_ls, str_lbl), float_y in zip(
+        [
+            (float_q1,   "#cc6600", ":", "Q1"),
+            (float_q2,   "#cc0000", ":", "Q2"),
+            (float_q3,   "#cc6600", ":", "Q3"),
+            (float_mean, str_color, "--", "μ"),
+        ],
+        [0.98, 0.86, 0.98, 0.74],
+    ):
         obj_ax.axvline(float_val, linestyle=str_ls, linewidth=1.6, color=str_lc)
+        obj_ax.text(
+            float_val, float_y,
+            f"{str_lbl}\n{float_val:.2f}{str_unit}",
+            transform=_xform, color=str_lc,
+            fontsize=7.5, va="top", ha="left", linespacing=1.2,
+        )
 
     obj_ax.grid(axis="y", linestyle="--", alpha=0.3)
 
@@ -168,12 +177,13 @@ def _save_batch_hist(
             _draw_quartile_hist(obj_ax, arr_v, str_color, str_unit,
                                 float_xlim_min, float_xlim_max, int_bins_factor)
             if float_vline_ref is not None:
-                obj_ax.axvline(float_vline_ref, linestyle="-", linewidth=2.0,
-                               color="#cc0000", label=f"ref={float_vline_ref}{str_unit}")
-                float_ymax = obj_ax.get_ylim()[1]
-                obj_ax.text(float_vline_ref, float_ymax * 0.97,
-                            f" ref={float_vline_ref}{str_unit}",
-                            color="#cc0000", fontsize=9, va="top")
+                obj_ax.axvline(float_vline_ref, linestyle="-", linewidth=2.0, color="#dd2222")
+                obj_ax.text(
+                    float_vline_ref, 0.62,
+                    f"ref\n{float_vline_ref:.2f}{str_unit}",
+                    transform=obj_ax.get_xaxis_transform(),
+                    color="#dd2222", fontsize=7.5, va="top", ha="left", linespacing=1.2,
+                )
         else:
             obj_ax.text(0.5, 0.5, "No data", ha="center", va="center",
                         transform=obj_ax.transAxes, fontsize=13, color="#666666")
@@ -300,6 +310,7 @@ def save_secondary_batch_histograms(
         str_color="#2266cc",
         str_unit=" µm",
         float_xlim_min=float_size_std_xmin, float_xlim_max=float_size_std_xmax,
+        int_bins_factor=2,
     )
     if float_size_ref is not None and list_size_rmsds:
         float_rmsd_xmin, float_rmsd_xmax = _std_xlim(list_size_rmsds, float_hard_min=0.0)
@@ -311,6 +322,7 @@ def save_secondary_batch_histograms(
             str_color="#e06010",
             str_unit=" µm",
             float_xlim_min=float_rmsd_xmin, float_xlim_max=float_rmsd_xmax,
+            int_bins_factor=2,
         )
     _save_batch_hist(
         list_vals=list_sphs,
